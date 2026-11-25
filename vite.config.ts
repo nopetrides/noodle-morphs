@@ -5,7 +5,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig(() => {
   return {
-    base: '/',
+    base: '/noodle-morphs/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
