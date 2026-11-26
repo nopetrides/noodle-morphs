@@ -1,4 +1,14 @@
 import {
+  ContentFlag,
+  DEFAULT_GAME_CONFIG,
+  hasContentFlag,
+  normalizeGameConfig,
+  SAVE_SLOT_IDS,
+  type GameConfig,
+  type SaveSlotId,
+} from './contentFlags';
+import {
+  BASE_MAX_DISPLAY_SNAKES,
   clampUint,
   createDefaultEconomyState,
   createDefaultHissDepotState,
@@ -24,6 +34,11 @@ import type {
 
 const STORAGE_KEY_V2 = 'morpharium_save_v2';
 const LEGACY_STORAGE_KEY_V1 = 'morpharium_save_v1';
+const ACTIVE_SLOT_KEY = 'morpharium_active_slot';
+
+function getSlotStorageKey(slotId: SaveSlotId): string {
+  return `morpharium_save_slot_${slotId}`;
+}
 
 /**
  * Compact per-snake leaf entry stored inside a MorphTrieNode.
@@ -76,6 +91,7 @@ export interface CompactSavePayloadV2 {
   ready?: 1; // 1 when clutch already finished & deducted vigor (awaiting reveal)
   cfg: { lamp: boolean; mute: boolean };
   eco?: EconomyState;
+  game?: GameConfig;
   at: number;
 }
 
@@ -91,7 +107,20 @@ export interface LoadedGameState {
   clutchesHatched: number;
   settings: TerrariumSettings;
   economy: EconomyState;
+  gameConfig: GameConfig;
   savedAt: number;
+}
+
+export interface SaveSlotSummary {
+  slotId: SaveSlotId;
+  isEmpty: boolean;
+  savedAt: number;
+  snakeCount: number;
+  discoveredCount: number;
+  clutchesHatched: number;
+  money: number;
+  gameConfig: GameConfig;
+  previewSnakes: SnakeEntity[];
 }
 
 interface LegacySavedGameStateV1 {
@@ -167,10 +196,11 @@ function encodeGenotypeCode(genotype: Genotype): string {
 }
 
 export function encodeSaveStateV2(
-  state: Omit<LoadedGameState, 'savedAt' | 'displayedIds' | 'economy' | 'clutchReady'> & {
+  state: Omit<LoadedGameState, 'savedAt' | 'displayedIds' | 'economy' | 'clutchReady' | 'gameConfig'> & {
     displayedIds?: string[];
     economy?: EconomyState;
     clutchReady?: boolean;
+    gameConfig?: GameConfig;
   },
   now = Date.now()
 ): CompactSavePayloadV2 {
@@ -240,6 +270,7 @@ export function encodeSaveStateV2(
   }
 
   const economy = state.economy ?? createDefaultEconomyState();
+  const gameConfig = normalizeGameConfig(state.gameConfig);
 
   return {
     v: 2,
@@ -266,6 +297,7 @@ export function encodeSaveStateV2(
         cooldownRemainingSec: Math.round(Math.max(0, economy.jeanPool.cooldownRemainingSec) * 10) / 10,
       },
     },
+    game: gameConfig,
     at: now,
   };
 }
@@ -349,6 +381,8 @@ function hydrateEconomy(raw: EconomyState | undefined, elapsedSec: number): Econ
     typeof raw.sellUnlocked === 'boolean' ? raw.sellUnlocked : totalSold >= 1;
   const jeanPoolIntroSeen =
     typeof raw.jeanPoolIntroSeen === 'boolean' ? raw.jeanPoolIntroSeen : totalSold >= 1;
+  const hissDepotIntroSeen =
+    typeof raw.hissDepotIntroSeen === 'boolean' ? raw.hissDepotIntroSeen : totalSold >= 3;
 
   return {
     money: clampUint(raw.money),
@@ -356,6 +390,7 @@ function hydrateEconomy(raw: EconomyState | undefined, elapsedSec: number): Econ
     soldMorphKeys: Array.isArray(raw.soldMorphKeys) ? raw.soldMorphKeys : [],
     sellUnlocked,
     jeanPoolIntroSeen,
+    hissDepotIntroSeen,
     jeanPool: {
       purchasesCount: clampUint(raw.jeanPool?.purchasesCount ?? 0),
       cooldownRemainingSec: Math.max(0, (raw.jeanPool?.cooldownRemainingSec ?? 0) - elapsedSec),
@@ -522,7 +557,26 @@ export function decodeSaveStateV2(
     : new Set<string>([payload.sireId, payload.damId]);
   snakes = recoverSnakesVigor(snakes, activelyBreedingIds, elapsedSec);
 
-  const economy = hydrateEconomy(payload.eco, elapsedSec);
+  const gameConfig = normalizeGameConfig(payload.game);
+  const hissDepotEnabled = hasContentFlag(gameConfig.contentFlags, ContentFlag.HissDepot);
+  const hydratedEconomy = hydrateEconomy(payload.eco, elapsedSec);
+  const economy: EconomyState = hissDepotEnabled
+    ? hydratedEconomy
+    : {
+        ...hydratedEconomy,
+        hissDepot: createDefaultHissDepotState(),
+      };
+
+  // If Hiss Depot is disabled, enforce baseline display slot cap cleanly
+  const maxDisp = hissDepotEnabled
+    ? BASE_MAX_DISPLAY_SNAKES + economy.hissDepot.displaySlotsBought
+    : BASE_MAX_DISPLAY_SNAKES;
+  if (validDisplayedIds.length > maxDisp) {
+    const allowed = new Set(validDisplayedIds.slice(0, maxDisp));
+    validDisplayedIds.length = 0;
+    for (const id of allowed) validDisplayedIds.push(id);
+    snakes = snakes.map((s) => ({ ...s, onDisplay: allowed.has(s.id) }));
+  }
 
   return {
     snakes,
@@ -539,7 +593,8 @@ export function decodeSaveStateV2(
       muted: payload.cfg?.mute ?? false,
     },
     economy,
-    savedAt: now,
+    gameConfig,
+    savedAt: typeof payload.at === 'number' ? payload.at : now,
   };
 }
 
@@ -587,6 +642,7 @@ function decodeLegacyV1(raw: string, now = Date.now()): LoadedGameState | null {
         muted: parsed.settings?.muted ?? false,
       },
       economy: createDefaultEconomyState(),
+      gameConfig: { ...DEFAULT_GAME_CONFIG },
       savedAt: now,
     };
   } catch {
@@ -594,47 +650,174 @@ function decodeLegacyV1(raw: string, now = Date.now()): LoadedGameState | null {
   }
 }
 
-export function loadSavedState(): LoadedGameState | null {
+export type SaveableGameState = Omit<
+  LoadedGameState,
+  'savedAt' | 'displayedIds' | 'economy' | 'clutchReady' | 'gameConfig'
+> & {
+  displayedIds?: string[];
+  economy?: EconomyState;
+  clutchReady?: boolean;
+  gameConfig?: GameConfig;
+};
+
+/** Transparently migrates any pre-slot legacy save into Slot 1 if Slot 1 is empty. */
+export function migrateLegacySaveIfNeeded(): void {
   try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    const slot1Key = getSlotStorageKey(1);
+    if (window.localStorage.getItem(slot1Key)) return;
+
     const rawV2 = window.localStorage.getItem(STORAGE_KEY_V2);
     if (rawV2) {
       const parsedV2 = JSON.parse(rawV2) as CompactSavePayloadV2;
       const decoded = decodeSaveStateV2(parsedV2);
-      if (decoded) return decoded;
+      if (decoded) {
+        window.localStorage.setItem(slot1Key, rawV2);
+        window.localStorage.setItem(ACTIVE_SLOT_KEY, '1');
+        window.localStorage.removeItem(STORAGE_KEY_V2);
+        return;
+      }
     }
 
     const rawV1 = window.localStorage.getItem(LEGACY_STORAGE_KEY_V1);
     if (rawV1) {
       const migrated = decodeLegacyV1(rawV1);
       if (migrated) {
-        saveGameState(migrated);
+        saveToSlot(1, migrated);
         window.localStorage.removeItem(LEGACY_STORAGE_KEY_V1);
-        return migrated;
       }
     }
+  } catch {
+    // Ignore storage access errors
+  }
+}
+
+export function getLastActiveSlotId(): SaveSlotId | null {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return null;
+    const raw = Number(window.localStorage.getItem(ACTIVE_SLOT_KEY));
+    if (raw === 1 || raw === 2 || raw === 3) return raw;
     return null;
   } catch {
     return null;
   }
 }
 
-export function saveGameState(
-  state: Omit<LoadedGameState, 'savedAt' | 'displayedIds' | 'economy' | 'clutchReady'> & {
-    displayedIds?: string[];
-    economy?: EconomyState;
-    clutchReady?: boolean;
-  }
-): void {
+export function setLastActiveSlotId(slotId: SaveSlotId | null): void {
   try {
-    const compact = encodeSaveStateV2(state);
-    window.localStorage.setItem(STORAGE_KEY_V2, JSON.stringify(compact));
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    if (slotId === null) {
+      window.localStorage.removeItem(ACTIVE_SLOT_KEY);
+    } else {
+      window.localStorage.setItem(ACTIVE_SLOT_KEY, String(slotId));
+    }
+  } catch {
+    // Ignore
+  }
+}
+
+export function loadSaveSlot(slotId: SaveSlotId, now = Date.now()): LoadedGameState | null {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return null;
+    migrateLegacySaveIfNeeded();
+    const raw = window.localStorage.getItem(getSlotStorageKey(slotId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CompactSavePayloadV2;
+    return decodeSaveStateV2(parsed, now);
+  } catch {
+    return null;
+  }
+}
+
+export function saveToSlot(slotId: SaveSlotId, state: SaveableGameState, now = Date.now()): void {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    const compact = encodeSaveStateV2(state, now);
+    window.localStorage.setItem(getSlotStorageKey(slotId), JSON.stringify(compact));
+    window.localStorage.setItem(ACTIVE_SLOT_KEY, String(slotId));
   } catch {
     // Ignore quota or storage restriction errors silently
   }
 }
 
+export function deleteSaveSlot(slotId: SaveSlotId): void {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    window.localStorage.removeItem(getSlotStorageKey(slotId));
+    if (getLastActiveSlotId() === slotId) {
+      const nextMostRecent = getMostRecentSaveSlot();
+      setLastActiveSlotId(nextMostRecent);
+    }
+  } catch {
+    // Ignore
+  }
+}
+
+export function listSaveSlots(): SaveSlotSummary[] {
+  migrateLegacySaveIfNeeded();
+  return SAVE_SLOT_IDS.map((slotId) => {
+    const loaded = loadSaveSlot(slotId);
+    if (!loaded) {
+      return {
+        slotId,
+        isEmpty: true,
+        savedAt: 0,
+        snakeCount: 0,
+        discoveredCount: 0,
+        clutchesHatched: 0,
+        money: 0,
+        gameConfig: { ...DEFAULT_GAME_CONFIG },
+        previewSnakes: [],
+      };
+    }
+    return {
+      slotId,
+      isEmpty: false,
+      savedAt: loaded.savedAt,
+      snakeCount: loaded.snakes.length,
+      discoveredCount: Object.keys(loaded.discoveries).length,
+      clutchesHatched: loaded.clutchesHatched,
+      money: loaded.economy.money,
+      gameConfig: loaded.gameConfig,
+      previewSnakes: loaded.snakes.slice(0, 2),
+    };
+  });
+}
+
+export function hasAnySaveSlots(): boolean {
+  return listSaveSlots().some((slot) => !slot.isEmpty);
+}
+
+export function getMostRecentSaveSlot(): SaveSlotId | null {
+  const occupied = listSaveSlots().filter((s) => !s.isEmpty);
+  if (occupied.length === 0) return null;
+
+  // Prefer the most recently saved timestamp
+  occupied.sort((a, b) => b.savedAt - a.savedAt);
+  return occupied[0].slotId;
+}
+
+export function loadSavedState(): LoadedGameState | null {
+  migrateLegacySaveIfNeeded();
+  const preferred = getLastActiveSlotId() ?? getMostRecentSaveSlot();
+  if (preferred) {
+    return loadSaveSlot(preferred);
+  }
+  return null;
+}
+
+export function saveGameState(state: SaveableGameState): void {
+  const target = getLastActiveSlotId() ?? 1;
+  saveToSlot(target, state);
+}
+
 export function clearSavedState(): void {
   try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    for (const slotId of SAVE_SLOT_IDS) {
+      window.localStorage.removeItem(getSlotStorageKey(slotId));
+    }
+    window.localStorage.removeItem(ACTIVE_SLOT_KEY);
     window.localStorage.removeItem(STORAGE_KEY_V2);
     window.localStorage.removeItem(LEGACY_STORAGE_KEY_V1);
   } catch {

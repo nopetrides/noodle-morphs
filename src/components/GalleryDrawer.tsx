@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
 import { ArrowUpDown, Check, DollarSign, Eye, EyeOff, Pencil, Sparkles, X } from 'lucide-react';
+import { ContentFlag, hasContentFlag } from '../game/contentFlags';
 import {
   analyzeSaleWarnings,
   canSnakeBreed,
   evaluateSnakeSaleValue,
   formatCurrency,
+  getEffectiveHissDepot,
   getMaxVigor,
   getMorphCountMap,
   getRecoverySecondsNeeded,
@@ -16,7 +18,7 @@ import {
 import {
   computeBreedingPreview,
   formatMutationOddsText,
-  LOCI_ORDER,
+  getEnabledLoci,
   LOCUS_DEFINITIONS,
 } from '../game/genetics';
 import {
@@ -49,6 +51,7 @@ interface GalleryDrawerProps {
   maxDisplay: number;
   clutchesHatched: number;
   economy: EconomyState;
+  contentFlags: number;
   onChangeTab: (tab: ActiveDrawerTab) => void;
   onClose: () => void;
   onToggleDisplay: (snakeId: string) => void;
@@ -85,6 +88,7 @@ export function GalleryDrawer({
   maxDisplay,
   clutchesHatched,
   economy,
+  contentFlags,
   onChangeTab,
   onClose,
   onToggleDisplay,
@@ -109,13 +113,23 @@ export function GalleryDrawer({
   const [parentSort, setParentSort] = useState<ParentSortMode>('undiscovered');
   const [showAllBreedingOdds, setShowAllBreedingOdds] = useState(false);
 
+  const customEnabled = hasContentFlag(contentFlags, ContentFlag.CustomMorphs);
+  const jeanPoolEnabled = hasContentFlag(contentFlags, ContentFlag.JeanPool);
+  const hissDepotEnabled = hasContentFlag(contentFlags, ContentFlag.HissDepot);
+  const enabledLoci = useMemo(() => getEnabledLoci(contentFlags), [contentFlags]);
+  const effectiveHissDepot = useMemo(
+    () => getEffectiveHissDepot(economy, contentFlags),
+    [economy, contentFlags]
+  );
+
   const displayedCount = snakes.filter((s) => s.onDisplay).length;
   const discoveredKeys = useMemo(() => new Set(Object.keys(discoveries)), [discoveries]);
   const soldMorphKeys = useMemo(() => new Set(economy.soldMorphKeys), [economy.soldMorphKeys]);
-  const jeanPoolUnlocked = isJeanPoolUnlocked(economy);
-  const hissDepotUnlocked = isHissDepotUnlocked(economy);
+  const jeanPoolUnlocked = isJeanPoolUnlocked(economy, contentFlags);
+  const hissDepotUnlocked = isHissDepotUnlocked(economy, contentFlags);
   const sellUnlocked = economy.sellUnlocked || hasTriplicateMorph(snakes);
-  const showSellTutorial = sellUnlocked && economy.totalSnakesSold === 0;
+  const showSellTutorial =
+    sellUnlocked && economy.totalSnakesSold === 0 && (jeanPoolEnabled || hissDepotEnabled);
   const morphCounts = useMemo(() => getMorphCountMap(snakes), [snakes]);
   const firstExtraCollectionSnakeId = useMemo(() => {
     if (!showSellTutorial) return null;
@@ -170,8 +184,14 @@ export function GalleryDrawer({
   );
 
   const breedingPreview = useMemo(
-    () => computeBreedingPreview(sire, dam, discoveredKeys, economy.hissDepot.biasWeights),
-    [sire, dam, discoveredKeys, economy.hissDepot.biasWeights]
+    () =>
+      computeBreedingPreview(
+        sire,
+        dam,
+        discoveredKeys,
+        hissDepotEnabled ? effectiveHissDepot.biasWeights : undefined
+      ),
+    [sire, dam, discoveredKeys, hissDepotEnabled, effectiveHissDepot.biasWeights]
   );
 
   const undiscoveredBreedingCount = useMemo(
@@ -801,10 +821,14 @@ export function GalleryDrawer({
               <div className="rounded-xl bg-[#221D17] border border-[#D8BC87]/18 p-4 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h4 className="text-xs font-semibold text-[#D9C7AE]">
-                    Ball Python Genetics Reference ({LOCI_ORDER.length} Traits · Real-World + Custom Originals)
+                    Ball Python Genetics Reference ({enabledLoci.length} Traits
+                    {customEnabled ? ' · Real-World + Custom Originals' : ' · Real-World Only'})
                   </h4>
                   <div className="flex flex-wrap items-center gap-1">
-                    {(['all', 'dominant', 'codominant', 'recessive', 'custom'] as const).map((m) => (
+                    {(customEnabled
+                      ? (['all', 'dominant', 'codominant', 'recessive', 'custom'] as const)
+                      : (['all', 'dominant', 'codominant', 'recessive'] as const)
+                    ).map((m) => (
                       <button
                         key={m}
                         type="button"
@@ -823,7 +847,7 @@ export function GalleryDrawer({
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-2 text-xs">
-                  {LOCI_ORDER.filter((id) => {
+                  {enabledLoci.filter((id) => {
                     const def = LOCUS_DEFINITIONS[id];
                     if (refModeFilter === 'all') return true;
                     if (refModeFilter === 'custom') return Boolean(def.isCustom);
@@ -979,14 +1003,16 @@ export function GalleryDrawer({
               snakes={snakes}
               discoveries={discoveries}
               soldMorphKeys={soldMorphKeys}
+              contentFlags={contentFlags}
               onDebugAddSnake={onDebugAddSnake}
             />
           )}
 
-          {activeTab === 'jeanpool' && (
+          {activeTab === 'jeanpool' && jeanPoolUnlocked && (
             <JeanPoolPanel
               snakes={snakes}
               economy={economy}
+              contentFlags={contentFlags}
               onBuyOffer={onBuyJeanPoolOffer}
             />
           )}

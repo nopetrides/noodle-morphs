@@ -1,6 +1,12 @@
 import {
+  ContentFlag,
+  DEFAULT_CONTENT_FLAGS,
+  hasContentFlag,
+} from './contentFlags';
+import {
   countAlleles,
   evaluatePhenotype,
+  getEnabledLoci,
   LOCI_ORDER,
   LOCUS_DEFINITIONS,
   makeGenotype,
@@ -102,6 +108,7 @@ export function createDefaultEconomyState(seed = 101): EconomyState {
     soldMorphKeys: [],
     sellUnlocked: false,
     jeanPoolIntroSeen: false,
+    hissDepotIntroSeen: false,
     jeanPool: {
       purchasesCount: 0,
       cooldownRemainingSec: 0,
@@ -131,13 +138,21 @@ export function hasTriplicateMorph(snakes: SnakeEntity[]): boolean {
   return false;
 }
 
-/** The Jean Pool opens immediately after the player completes their first sale */
-export function isJeanPoolUnlocked(economy: EconomyState): boolean {
+/** The Jean Pool opens immediately after the player completes their first sale (when enabled) */
+export function isJeanPoolUnlocked(
+  economy: EconomyState,
+  contentFlags = DEFAULT_CONTENT_FLAGS
+): boolean {
+  if (!hasContentFlag(contentFlags, ContentFlag.JeanPool)) return false;
   return economy.totalSnakesSold >= 1 || economy.jeanPool.purchasesCount >= 1;
 }
 
-/** The Hiss Depot opens after adopting your first Jean Pool snake (or after 3 sales / existing upgrades) */
-export function isHissDepotUnlocked(economy: EconomyState): boolean {
+/** The Hiss Depot opens after adopting your first Jean Pool snake (or after 3 sales / existing upgrades) when enabled */
+export function isHissDepotUnlocked(
+  economy: EconomyState,
+  contentFlags = DEFAULT_CONTENT_FLAGS
+): boolean {
+  if (!hasContentFlag(contentFlags, ContentFlag.HissDepot)) return false;
   return (
     economy.jeanPool.purchasesCount >= 1 ||
     economy.totalSnakesSold >= 3 ||
@@ -147,6 +162,17 @@ export function isHissDepotUnlocked(economy: EconomyState): boolean {
     economy.hissDepot.biasCapsBought.codominant > 0 ||
     economy.hissDepot.biasCapsBought.recessive > 0
   );
+}
+
+/** Returns active Hiss Depot modifiers when enabled, or clean neutral defaults when Hiss Depot is disabled. */
+export function getEffectiveHissDepot(
+  economy: EconomyState,
+  contentFlags = DEFAULT_CONTENT_FLAGS
+): HissDepotState {
+  if (!hasContentFlag(contentFlags, ContentFlag.HissDepot)) {
+    return createDefaultHissDepotState();
+  }
+  return economy.hissDepot;
 }
 
 // --- Vigour & Breed Time Calculation ---
@@ -359,8 +385,11 @@ export interface JeanPoolOffer {
   snake: SnakeEntity;
 }
 
-export function getMissingLoci(snakes: SnakeEntity[]): LocusId[] {
-  return LOCI_ORDER.filter((loc) =>
+export function getMissingLoci(
+  snakes: SnakeEntity[],
+  contentFlags = DEFAULT_CONTENT_FLAGS
+): LocusId[] {
+  return getEnabledLoci(contentFlags).filter((loc) =>
     snakes.every((s) => countAlleles(s.genotype[loc]) === 0)
   );
 }
@@ -386,9 +415,10 @@ function seededRng(seed: number): () => number {
  */
 export function buildJeanPoolOffers(
   snakes: SnakeEntity[],
-  jeanPool: { purchasesCount: number; stockSeed: number }
+  jeanPool: { purchasesCount: number; stockSeed: number },
+  contentFlags = DEFAULT_CONTENT_FLAGS
 ): JeanPoolOffer[] {
-  const missing = getMissingLoci(snakes);
+  const missing = getMissingLoci(snakes, contentFlags);
   if (missing.length === 0) return [];
 
   const rng = seededRng(jeanPool.stockSeed + jeanPool.purchasesCount * 97);

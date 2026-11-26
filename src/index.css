@@ -25,6 +25,31 @@
   select {
     font-family: inherit;
   }
+
+  /* Consistent stylized warm terrarium scrollbars across all scrollable lists & modals */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(217, 167, 84, 0.52) rgba(27, 23, 19, 0.55);
+  }
+
+  *::-webkit-scrollbar {
+    height: 6px;
+    width: 6px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: rgba(24, 19, 15, 0.65);
+    border-radius: 9999px;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, rgba(217, 167, 84, 0.48), rgba(235, 194, 114, 0.78));
+    border-radius: 9999px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgba(235, 194, 114, 0.92);
+  }
 }
 
 .tabular-nums {
@@ -78,6 +103,45 @@
   }
 }
 
+@keyframes goldBorderSweep {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes attentionBounce {
+  0%, 62%, 100% {
+    transform: translateY(0) rotate(0deg) scale(1);
+  }
+  70% {
+    transform: translateY(-3px) rotate(-1.4deg) scale(1.03);
+  }
+  78% {
+    transform: translateY(0px) rotate(1.4deg) scale(1.01);
+  }
+  86% {
+    transform: translateY(-2px) rotate(-0.8deg) scale(1.02);
+  }
+  93% {
+    transform: translateY(0px) rotate(0.5deg) scale(1);
+  }
+}
+
+@keyframes pointerBob {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
 .animate-egg-wiggle {
   animation: eggWiggle 1.8s ease-in-out infinite;
 }
@@ -90,36 +154,52 @@
   animation: newMorphShimmer 2.2s cubic-bezier(0.16, 1, 0.3, 1) 2;
 }
 
+.animate-pointer-bob {
+  animation: pointerBob 1.15s ease-in-out infinite;
+}
+
+/* Moving glowing golden border + playful bounce/wiggle for high-priority CTA buttons */
+.btn-gold-attention {
+  position: relative;
+  z-index: 0;
+  border: 2px solid transparent;
+  background-image:
+    linear-gradient(#d9a754, #e5b765),
+    linear-gradient(120deg, #fff3c4, #f5c358, #b8741e, #ffe89e, #d99b38, #fff3c4);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  background-size: 100% 100%, 260% 260%;
+  box-shadow:
+    0 0 14px rgba(245, 200, 96, 0.55),
+    0 0 28px rgba(217, 167, 84, 0.28),
+    0 4px 12px rgba(0, 0, 0, 0.38);
+  animation:
+    goldBorderSweep 2.4s linear infinite,
+    attentionBounce 2.6s ease-in-out infinite;
+}
+
+.btn-gold-attention:hover {
+  background-image:
+    linear-gradient(#e7b96a, #f0c97e),
+    linear-gradient(120deg, #fff7d6, #ffd26e, #c88424, #fff0b8, #e6a944, #fff7d6);
+  box-shadow:
+    0 0 18px rgba(250, 214, 122, 0.78),
+    0 0 34px rgba(217, 167, 84, 0.42),
+    0 6px 14px rgba(0, 0, 0, 0.42);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-egg-wiggle,
   .animate-shimmer,
-  .animate-card-reveal {
+  .animate-card-reveal,
+  .animate-pointer-bob,
+  .btn-gold-attention {
     animation: none !important;
   }
 }
 
-/* Stylized warm terrarium horizontal scrollbar for bottom dock & tag bars */
+/* Retained class for explicit horizontal scroll containers */
 .dock-scroll {
   scrollbar-width: thin;
   scrollbar-color: rgba(217, 167, 84, 0.52) rgba(27, 23, 19, 0.55);
 }
-
-.dock-scroll::-webkit-scrollbar {
-  height: 5px;
-  width: 5px;
-}
-
-.dock-scroll::-webkit-scrollbar-track {
-  background: rgba(24, 19, 15, 0.65);
-  border-radius: 9999px;
-}
-
-.dock-scroll::-webkit-scrollbar-thumb {
-  background: linear-gradient(90deg, rgba(217, 167, 84, 0.45), rgba(235, 194, 114, 0.72));
-  border-radius: 9999px;
-}
-
-.dock-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(235, 194, 114, 0.9);
-}
-

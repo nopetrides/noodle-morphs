@@ -9,7 +9,12 @@ import {
   getRecoverySecondsNeeded,
   hasTriplicateMorph,
 } from '../game/economy';
-import { computeBreedingPreview, formatMutationOddsText } from '../game/genetics';
+import {
+  computeBreedingPreview,
+  formatMutationOddsText,
+  isLethalSpiderPairing,
+  pickSafeMateFor,
+} from '../game/genetics';
 import {
   buildUndiscoveredChildrenMap,
   type ParentSortMode,
@@ -40,6 +45,11 @@ interface HatchRevealModalProps {
   onRenameEggSnake: (eggId: string, name: string) => void;
   onToggleEggDisplay: (eggId: string) => void;
   onRequestSellEgg: (egg: ClutchEgg) => void;
+  onSpiderPairingBlocked?: (
+    attemptedA: string,
+    attemptedB: string,
+    replacementName: string | null
+  ) => void;
   onCompleteClutch: (nextSireId: string, nextDamId: string) => void;
 }
 
@@ -83,6 +93,7 @@ export function HatchRevealModal({
   onRenameEggSnake,
   onToggleEggDisplay,
   onRequestSellEgg,
+  onSpiderPairingBlocked,
   onCompleteClutch,
 }: HatchRevealModalProps) {
   const allRevealed = eggs.every((e) => e.revealed);
@@ -161,13 +172,31 @@ export function HatchRevealModal({
   );
   const morphCounts = useMemo(() => getMorphCountMap(combinedSnakes), [combinedSnakes]);
   const canShowSell = sellUnlocked || hasTriplicateMorph(combinedSnakes);
-  const firstExtraEggId = useMemo(() => {
+  const spotlightEgg = useMemo(() => {
     if (!showSellTutorial || !canShowSell) return null;
-    const found = eggs.find(
-      (e) => e.revealed && !e.sold && (morphCounts.get(e.snake.phenotype.morphKey) ?? 0) >= 3
-    );
-    return found?.id ?? null;
-  }, [showSellTutorial, canShowSell, eggs, morphCounts]);
+    for (const egg of eggs) {
+      if (!egg.revealed || egg.sold) continue;
+      if ((morphCounts.get(egg.snake.phenotype.morphKey) ?? 0) < 3) continue;
+      const otherUnsold = eggs
+        .filter((e) => !e.sold && e.id !== egg.id)
+        .map((e) => e.snake);
+      const warnings = analyzeSaleWarnings(
+        egg.snake,
+        [...allSnakes, ...otherUnsold],
+        sire.id,
+        dam.id,
+        true
+      );
+      if (warnings.canSell && !warnings.hasWarning) {
+        return {
+          egg,
+          valuation: evaluateSnakeSaleValue(egg.snake, soldMorphKeys),
+        };
+      }
+    }
+    return null;
+  }, [showSellTutorial, canShowSell, eggs, morphCounts, allSnakes, sire.id, dam.id, soldMorphKeys]);
+  const firstExtraEggId = spotlightEgg?.egg.id ?? null;
 
   const extraDisplaySelected = eggs.filter((e) => !e.sold && e.snake.onDisplay).length;
 
@@ -488,18 +517,37 @@ export function HatchRevealModal({
                   <select
                     id="next-sire-select"
                     value={selectedNextSire.id}
-                    onChange={(e) => setNextSireId(e.target.value)}
+                    onChange={(e) => {
+                      const chosen = selectableParents.find((s) => s.id === e.target.value);
+                      if (!chosen) return;
+                      if (isLethalSpiderPairing(chosen, selectedNextDam)) {
+                        const safeMate = pickSafeMateFor(chosen, selectableParents);
+                        if (safeMate) {
+                          setNextSireId(chosen.id);
+                          setNextDamId(safeMate.id);
+                        }
+                        onSpiderPairingBlocked?.(
+                          chosen.name,
+                          selectedNextDam.name,
+                          safeMate ? safeMate.name : null
+                        );
+                        return;
+                      }
+                      setNextSireId(chosen.id);
+                    }}
                     className="w-full px-3 py-2 rounded-lg bg-[#29221B] border border-[#D8BC87]/30 text-sm text-[#F5EFE4] focus:outline-none focus:border-[#D9A754]"
                   >
                     {sireCandidates.map((s) => {
                       const newCount =
                         s.id === selectedNextDam.id ? 0 : (sireUndiscoveredMap.get(s.id) ?? 0);
                       const rec = !canSnakeBreed(s) ? ` [Rec ${getRecoverySecondsNeeded(s)}s]` : '';
+                      const lethal =
+                        s.id !== selectedNextDam.id && isLethalSpiderPairing(s, selectedNextDam);
                       return (
                         <option key={s.id} value={s.id} disabled={s.id === selectedNextDam.id}>
                           {s.name} — {s.phenotype.morphName}
                           {rec}
-                          {newCount > 0 ? ` · +${newCount} new` : ''}
+                          {lethal ? ' · Spider × Spider blocked' : newCount > 0 ? ` · +${newCount} new` : ''}
                         </option>
                       );
                     })}
@@ -513,18 +561,37 @@ export function HatchRevealModal({
                   <select
                     id="next-dam-select"
                     value={selectedNextDam.id}
-                    onChange={(e) => setNextDamId(e.target.value)}
+                    onChange={(e) => {
+                      const chosen = selectableParents.find((s) => s.id === e.target.value);
+                      if (!chosen) return;
+                      if (isLethalSpiderPairing(selectedNextSire, chosen)) {
+                        const safeMate = pickSafeMateFor(chosen, selectableParents);
+                        if (safeMate) {
+                          setNextDamId(chosen.id);
+                          setNextSireId(safeMate.id);
+                        }
+                        onSpiderPairingBlocked?.(
+                          chosen.name,
+                          selectedNextSire.name,
+                          safeMate ? safeMate.name : null
+                        );
+                        return;
+                      }
+                      setNextDamId(chosen.id);
+                    }}
                     className="w-full px-3 py-2 rounded-lg bg-[#29221B] border border-[#D8BC87]/30 text-sm text-[#F5EFE4] focus:outline-none focus:border-[#D9A754]"
                   >
                     {damCandidates.map((s) => {
                       const newCount =
                         s.id === selectedNextSire.id ? 0 : (damUndiscoveredMap.get(s.id) ?? 0);
                       const rec = !canSnakeBreed(s) ? ` [Rec ${getRecoverySecondsNeeded(s)}s]` : '';
+                      const lethal =
+                        s.id !== selectedNextSire.id && isLethalSpiderPairing(selectedNextSire, s);
                       return (
                         <option key={s.id} value={s.id} disabled={s.id === selectedNextSire.id}>
                           {s.name} — {s.phenotype.morphName}
                           {rec}
-                          {newCount > 0 ? ` · +${newCount} new` : ''}
+                          {lethal ? ' · Spider × Spider blocked' : newCount > 0 ? ` · +${newCount} new` : ''}
                         </option>
                       );
                     })}
@@ -592,14 +659,73 @@ export function HatchRevealModal({
             <button
               type="button"
               data-testid="complete-clutch-btn"
+              disabled={Boolean(spotlightEgg)}
               onClick={() => onCompleteClutch(selectedNextSire.id, selectedNextDam.id)}
-              className="px-6 py-3 rounded-xl bg-[#D9A754] hover:bg-[#E7B96A] active:scale-[0.98] text-[#1C1610] font-semibold text-sm transition-all cursor-pointer whitespace-nowrap shrink-0 shadow-md shadow-black/30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#F5D692]"
+              className={`px-6 py-3 rounded-xl text-[#1C1610] font-semibold text-sm transition-all cursor-pointer whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#F5D692] disabled:opacity-45 disabled:cursor-not-allowed ${
+                spotlightEgg
+                  ? 'bg-[#D9A754] shadow-md shadow-black/30'
+                  : 'btn-gold-attention'
+              }`}
             >
               Finish Clutch &amp; Continue
             </button>
           </div>
         )}
       </div>
+
+      {/* First-Sale Spotlight Layer: dims & blocks the clutch reveal until the first safe third-of-a-kind sale completes */}
+      {spotlightEgg && (
+        <div
+          data-testid="first-sale-spotlight-overlay"
+          className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-[#0A0806]/78 backdrop-blur-[1.5px]"
+        >
+          <div className="w-full max-w-sm rounded-2xl bg-[#221B14] border-2 border-[#E9C16E]/80 shadow-2xl shadow-black/85 p-5 sm:p-6 text-center space-y-4 animate-card-reveal">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#382B18] border border-[#E9C16E]/55 text-[11px] font-semibold uppercase tracking-wider text-[#F7DC9A]">
+              <Sparkles className="w-3.5 h-3.5 text-[#E9C16E]" aria-hidden="true" />
+              <span>Extra Morph Ready</span>
+            </div>
+
+            <div className="space-y-1">
+              <h3 className="font-display text-xl sm:text-2xl font-bold text-[#F8F2E7]">
+                Sell to get funds
+              </h3>
+              <p className="text-xs sm:text-sm text-[#D6C9B6] leading-relaxed">
+                You now have three <strong className="text-[#F5EFE4]">{spotlightEgg.egg.snake.phenotype.morphName}</strong>{' '}
+                noodles, so <strong className="text-[#F1CD82]">{spotlightEgg.egg.snake.name}</strong> is safe to sell
+                without losing any genetics.
+              </p>
+            </div>
+
+            <div className="flex justify-center py-1">
+              <MiniSnakeCanvas
+                phenotype={spotlightEgg.egg.snake.phenotype}
+                width={220}
+                height={82}
+                animate
+              />
+            </div>
+
+            <button
+              type="button"
+              data-testid="first-sale-spotlight-btn"
+              onClick={() => onRequestSellEgg(spotlightEgg.egg)}
+              className="btn-gold-attention w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-[#1C1610] font-bold text-sm sm:text-base cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#F5D692]"
+            >
+              <DollarSign className="w-4 h-4 shrink-0" aria-hidden="true" />
+              <span>
+                Sell {spotlightEgg.egg.snake.name} · {formatCurrency(spotlightEgg.valuation.total)}
+                {spotlightEgg.valuation.isFirstSale ? ' ★' : ''}
+              </span>
+            </button>
+
+            {spotlightEgg.valuation.isFirstSale && (
+              <p className="text-[11px] text-[#E6C57F]">
+                Includes +{formatCurrency(spotlightEgg.valuation.firstSaleBonus)} First Sale Bonus
+              </p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

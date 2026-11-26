@@ -1,3 +1,8 @@
+import {
+  ContentFlag,
+  DEFAULT_CONTENT_FLAGS,
+  hasContentFlag,
+} from './contentFlags';
 import { clamp, createDefaultSkinFieldParams, SKIN_GENERATOR_VERSION } from './skinField';
 import type {
   AllelePair,
@@ -384,6 +389,49 @@ export const LOCUS_DEFINITIONS: Record<LocusId, LocusDefinition> = {
     isCustom: true,
   },
 };
+
+export function getLocusContentFlag(locusId: LocusId): ContentFlag {
+  const def = LOCUS_DEFINITIONS[locusId];
+  if (def.contentFlag !== undefined) return def.contentFlag;
+  return def.isCustom ? ContentFlag.CustomMorphs : ContentFlag.RealMorphs;
+}
+
+export function getEnabledLoci(contentFlags = DEFAULT_CONTENT_FLAGS): LocusId[] {
+  return LOCI_ORDER.filter((loc) => hasContentFlag(contentFlags, getLocusContentFlag(loc)));
+}
+
+/** True if the snake carries at least one copy of the dominant Spider gene. */
+export function carriesSpider(snake: SnakeEntity): boolean {
+  return countAlleles(snake.genotype.spider) >= 1;
+}
+
+/**
+ * Homozygous Super Spider (Spider × Spider) is lethal in real ball pythons.
+ * Returns true whenever both parents carry Spider so pairing can be blocked kindly.
+ */
+export function isLethalSpiderPairing(sire: SnakeEntity, dam: SnakeEntity): boolean {
+  return carriesSpider(sire) && carriesSpider(dam);
+}
+
+/**
+ * Picks a safe mate for `anchor` from `candidates` that is not `anchor` itself
+ * and does not form a lethal Spider × Spider pairing.
+ */
+export function pickSafeMateFor(
+  anchor: SnakeEntity,
+  candidates: SnakeEntity[],
+  preferredId?: string
+): SnakeEntity | null {
+  const valid = candidates.filter(
+    (c) => c.id !== anchor.id && !isLethalSpiderPairing(anchor, c)
+  );
+  if (valid.length === 0) return null;
+  if (preferredId) {
+    const pref = valid.find((c) => c.id === preferredId);
+    if (pref) return pref;
+  }
+  return valid[0];
+}
 
 /** Spontaneous mutation chance per egg: 1 in 1,000 (0.1%) so The Jean Pool is the primary gene source */
 export const MUTATION_CHANCE_PER_EGG = 0.001;
@@ -2379,12 +2427,14 @@ export function breedClutch(
   existingNames: Set<string>,
   clutchSize = 2,
   rng: () => number = Math.random,
-  bias?: GeneBiasDistribution
+  bias?: GeneBiasDistribution,
+  contentFlags = DEFAULT_CONTENT_FLAGS
 ): ClutchEgg[] {
   const preview = computeBreedingPreview(sire, dam, discoveredKeys, bias);
   const probByMorphKey = new Map(preview.map((e) => [e.morphKey, e.probability]));
   const usedNames = new Set(existingNames);
   const clutchDiscoveredKeys = new Set(discoveredKeys);
+  const enabledLoci = getEnabledLoci(contentFlags);
   const eggs: ClutchEgg[] = [];
   const now = Date.now();
 
@@ -2406,11 +2456,16 @@ export function breedClutch(
       childGenotype[loc] = normalizeAllelePair(sireAllele, damAllele);
     }
 
-    // Gentle spontaneous mutation roll weighted by gene bias if set
+    // Gentle spontaneous mutation roll weighted by gene bias if set (strictly within enabled content flags)
     let wasMutation = false;
     let mutationLocusName: string | null = null;
     if (rng() < MUTATION_CHANCE_PER_EGG) {
-      const candidates = LOCI_ORDER.filter((loc) => countAlleles(childGenotype[loc]) < 2);
+      const candidates = enabledLoci.filter((loc) => {
+        const current = countAlleles(childGenotype[loc]);
+        // Never mutate into homozygous lethal Super Spider
+        if (loc === 'spider' && current >= 1) return false;
+        return current < 2;
+      });
       if (candidates.length > 0) {
         const chosen = pickWeightedMutationLocus(candidates, bias, rng);
         const current = countAlleles(childGenotype[chosen]);
@@ -2424,6 +2479,11 @@ export function breedClutch(
       }
     }
 
+    // Belt-and-suspenders guard: never hatch homozygous lethal Super Spider
+    if (countAlleles(childGenotype.spider) >= 2) {
+      childGenotype.spider = [1, 0];
+    }
+
     const polygenicSeed = rng();
     const phenotype = evaluatePhenotype(childGenotype, polygenicSeed);
 
@@ -2431,7 +2491,7 @@ export function breedClutch(
     let odds: number;
     let isMutatedDisplay = false;
     if (wasMutation && mendelianProb === undefined) {
-      odds = Number((MUTATION_CHANCE_PER_EGG / LOCI_ORDER.length).toFixed(4));
+      odds = Number((MUTATION_CHANCE_PER_EGG / Math.max(1, enabledLoci.length)).toFixed(4));
       isMutatedDisplay = true;
     } else if (mendelianProb !== undefined) {
       odds = mendelianProb;
@@ -2524,13 +2584,21 @@ const STARTER_HET_POOL: LocusId[] = ['albino', 'piebald', 'clown', 'hypo'];
  * - Avoids Mojave + Lesser together on Clutch #1 so Blue-Eyed Leucistic remains a rewarding milestone.
  * - Both share 1 hidden recessive Het, guaranteeing exactly 8 Mendelian outcomes (6 undiscovered) on Clutch #1.
  */
-export function createRandomStarterPair(rng: () => number = Math.random): SnakeEntity[] {
+export function createRandomStarterPair(
+  rng: () => number = Math.random,
+  contentFlags = DEFAULT_CONTENT_FLAGS
+): SnakeEntity[] {
   const now = Date.now() - 60_000;
+  const enabledSet = new Set(getEnabledLoci(contentFlags));
+
+  const codomPool = STARTER_CODOMINANT_POOL.filter((loc) => enabledSet.has(loc));
+  const domPool = STARTER_DOMINANT_POOL.filter((loc) => enabledSet.has(loc));
+  const hetPool = STARTER_HET_POOL.filter((loc) => enabledSet.has(loc));
 
   const codomLocus =
-    STARTER_CODOMINANT_POOL[Math.floor(rng() * STARTER_CODOMINANT_POOL.length)];
+    codomPool[Math.floor(rng() * codomPool.length)] ?? STARTER_CODOMINANT_POOL[0];
 
-  const secondaryPool = [...STARTER_CODOMINANT_POOL, ...STARTER_DOMINANT_POOL].filter((loc) => {
+  const secondaryPool = [...codomPool, ...domPool].filter((loc) => {
     if (loc === codomLocus) return false;
     // Prevent an immediate Clutch #1 Blue-Eyed Leucistic complex shortcut
     if (
@@ -2542,12 +2610,13 @@ export function createRandomStarterPair(rng: () => number = Math.random): SnakeE
     return true;
   });
 
-  const secondLocus = secondaryPool[Math.floor(rng() * secondaryPool.length)];
+  const secondLocus =
+    secondaryPool[Math.floor(rng() * secondaryPool.length)] ?? STARTER_CODOMINANT_POOL[1];
   const swapOrder = rng() < 0.5;
   const locusA = swapOrder ? secondLocus : codomLocus;
   const locusB = swapOrder ? codomLocus : secondLocus;
 
-  const sharedHet = STARTER_HET_POOL[Math.floor(rng() * STARTER_HET_POOL.length)];
+  const sharedHet = hetPool[Math.floor(rng() * hetPool.length)] ?? STARTER_HET_POOL[0];
   const usedNames = new Set<string>();
   const nameA = pickCozySnakeName(usedNames, rng);
   usedNames.add(nameA);
@@ -2651,6 +2720,62 @@ export function createStarterSnakes(): SnakeEntity[] {
       petCount: 0,
     };
   });
+}
+
+/**
+ * Generates random showcase morphs exclusively for the title screen vivarium background.
+ * Uses unique `title_` IDs so they are cleanly replaced when starting or loading a save.
+ */
+export function createTitleShowcaseSnakes(
+  count = 5,
+  rng: () => number = Math.random
+): SnakeEntity[] {
+  const now = Date.now();
+  const usedNames = new Set<string>();
+  const showcasePool = LOCI_ORDER.filter((loc) => loc !== 'spider');
+  const snakes: SnakeEntity[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const partial: Partial<Genotype> = {};
+    const geneCount = 1 + (rng() < 0.65 ? 1 : 0);
+    for (let g = 0; g < geneCount; g++) {
+      const loc = showcasePool[Math.floor(rng() * showcasePool.length)];
+      const def = LOCUS_DEFINITIONS[loc];
+      if (def.mode === 'recessive') {
+        partial[loc] = [1, 1];
+      } else if (def.mode === 'codominant' && rng() < 0.25) {
+        partial[loc] = [1, 1];
+      } else {
+        partial[loc] = [1, 0];
+      }
+    }
+
+    const genotype = makeGenotype(partial);
+    const seed = Number((0.1 + rng() * 0.8).toFixed(4));
+    const phenotype = evaluatePhenotype(genotype, seed);
+    const name = pickCozySnakeName(usedNames, rng);
+    usedNames.add(name);
+
+    snakes.push({
+      id: `title_${now}_${i}_${Math.floor(rng() * 10000)}`,
+      name,
+      genotype,
+      polygenicSeed: seed,
+      phenotype,
+      currentVigor: phenotype.lineageVigor,
+      onDisplay: true,
+      hatchedAt: now + i,
+      generation: 1,
+      sire: null,
+      dam: null,
+      hatchOdds: 1,
+      hatchOddsLabel: 'Showcase',
+      wasMutation: false,
+      petCount: 0,
+    });
+  }
+
+  return snakes;
 }
 
 export function buildInitialDiscoveries(snakes: SnakeEntity[]): Record<string, MorphDiscovery> {

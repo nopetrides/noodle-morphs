@@ -1,3 +1,7 @@
+import type { ContentFlag, GameConfig, GameModeId, SaveSlotId } from './contentFlags';
+export { ContentFlag };
+export type { GameConfig, GameModeId, SaveSlotId };
+
 export type GamePhase = 'title' | 'playing' | 'paused';
 
 export type LocusId =
@@ -57,6 +61,8 @@ export interface LocusDefinition {
   tags: MorphTag[];
   /** True for Morpharium-original custom morphs/patterns not based on real-world ball python genes */
   isCustom?: boolean;
+  /** Content expansion flag gating this locus (defaults to CustomMorphs if isCustom, else RealMorphs) */
+  contentFlag?: ContentFlag;
 }
 
 /**
@@ -392,6 +398,8 @@ export interface EconomyState {
   sellUnlocked: boolean;
   /** True once the player has seen the Jean Pool unlock intro dialogue */
   jeanPoolIntroSeen: boolean;
+  /** True once the player has seen the Hiss Depot unlock intro dialogue */
+  hissDepotIntroSeen?: boolean;
   jeanPool: JeanPoolState;
   hissDepot: HissDepotState;
 }

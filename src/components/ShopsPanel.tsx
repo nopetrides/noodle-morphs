@@ -16,7 +16,7 @@ import {
   MAX_DISPLAY_UPGRADES,
   MAX_INCUBATOR_UPGRADES,
 } from '../game/economy';
-import { LOCI_ORDER, LOCUS_DEFINITIONS } from '../game/genetics';
+import { getEnabledLoci, LOCUS_DEFINITIONS } from '../game/genetics';
 import type { EconomyState, InheritanceMode, SnakeEntity } from '../game/types';
 import { MiniSnakeCanvas } from './MiniSnakeCanvas';
 
@@ -33,17 +33,22 @@ function formatCooldown(sec: number): string {
 interface JeanPoolPanelProps {
   snakes: SnakeEntity[];
   economy: EconomyState;
+  contentFlags: number;
   onBuyOffer: (offer: JeanPoolOffer) => void;
 }
 
-export function JeanPoolPanel({ snakes, economy, onBuyOffer }: JeanPoolPanelProps) {
-  const missingLoci = useMemo(() => getMissingLoci(snakes), [snakes]);
+export function JeanPoolPanel({ snakes, economy, contentFlags, onBuyOffer }: JeanPoolPanelProps) {
+  const enabledLoci = useMemo(() => getEnabledLoci(contentFlags), [contentFlags]);
+  const missingLoci = useMemo(
+    () => getMissingLoci(snakes, contentFlags),
+    [snakes, contentFlags]
+  );
   const offers = useMemo(
-    () => buildJeanPoolOffers(snakes, economy.jeanPool),
-    [snakes, economy.jeanPool]
+    () => buildJeanPoolOffers(snakes, economy.jeanPool, contentFlags),
+    [snakes, economy.jeanPool, contentFlags]
   );
   const onCooldown = economy.jeanPool.cooldownRemainingSec > 0;
-  const ownedGeneCount = LOCI_ORDER.length - missingLoci.length;
+  const ownedGeneCount = enabledLoci.length - missingLoci.length;
 
   return (
     <div data-testid="jean-pool-panel" className="space-y-5">
@@ -62,7 +67,7 @@ export function JeanPoolPanel({ snakes, economy, onBuyOffer }: JeanPoolPanelProp
               The Jean Pool
             </h3>
             <span className="font-mono-code text-xs text-[#A9C4E4] tabular-nums">
-              {ownedGeneCount}/{LOCI_ORDER.length} genes in collection
+              {ownedGeneCount}/{enabledLoci.length} genes in collection
             </span>
           </div>
           <p className="text-xs sm:text-sm text-[#B8C7D9]">

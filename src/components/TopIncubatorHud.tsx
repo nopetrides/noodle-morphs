@@ -4,6 +4,7 @@ import {
   formatCurrency,
   getRecoverySecondsNeeded,
 } from '../game/economy';
+import { DEV_TOOLS_ENABLED } from '../game/env';
 import type { SnakeEntity } from '../game/types';
 
 interface TopIncubatorHudProps {
@@ -182,7 +183,7 @@ export function TopIncubatorHud({
                   type="button"
                   onClick={onHatchReady}
                   data-testid="hatch-clutch-btn"
-                  className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-[#D9A754] hover:bg-[#E7B96A] active:scale-[0.98] text-[#1C1610] font-semibold text-xs sm:text-sm transition-all duration-150 shadow-md shadow-black/30 cursor-pointer whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#F5D692]"
+                  className="btn-gold-attention flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[#1C1610] font-semibold text-xs sm:text-sm transition-all duration-150 cursor-pointer whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#F5D692]"
                 >
                   <Sparkles className="w-4 h-4 shrink-0" aria-hidden="true" />
                   <span>Hatch Clutch</span>
@@ -209,16 +210,18 @@ export function TopIncubatorHud({
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={onWarmIncubator}
-                    aria-label="Warm incubator eggs by 5 seconds"
-                    title="Gently warm eggs (-5s)"
-                    className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-[#2E261F] hover:bg-[#3B3128] border border-[#D8BC87]/25 text-xs font-medium text-[#EAD9B7] transition-colors cursor-pointer whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-[#E8BE70]"
-                  >
-                    <Flame className="w-3.5 h-3.5 text-[#E5A752]" aria-hidden="true" />
-                    <span className="hidden sm:inline">Warm</span>
-                  </button>
+                  {DEV_TOOLS_ENABLED && (
+                    <button
+                      type="button"
+                      onClick={onWarmIncubator}
+                      aria-label="Warm incubator eggs by 5 seconds"
+                      title="[Dev] Gently warm eggs (-5s)"
+                      className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-[#2E261F] hover:bg-[#3B3128] border border-[#D8BC87]/25 text-xs font-medium text-[#EAD9B7] transition-colors cursor-pointer whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-[#E8BE70]"
+                    >
+                      <Flame className="w-3.5 h-3.5 text-[#E5A752]" aria-hidden="true" />
+                      <span className="hidden sm:inline">Warm</span>
+                    </button>
+                  )}
                 </div>
               )}
             </>

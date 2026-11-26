@@ -1,9 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  ContentFlag,
+  createGameConfigForMode,
+  hasContentFlag,
+} from './contentFlags';
+import {
+  BASE_CLUTCH_SIZE,
+  BASE_MAX_DISPLAY_SNAKES,
+  buildJeanPoolOffers,
+  createDefaultEconomyState,
+  getActiveClutchConfig,
+  getEffectiveHissDepot,
+  getMaxDisplaySlots,
+  getMissingLoci,
+  isHissDepotUnlocked,
+  isJeanPoolUnlocked,
+} from './economy';
+import {
   breedClutch,
   buildInitialDiscoveries,
+  createRandomStarterPair,
   createStarterSnakes,
+  createTitleShowcaseSnakes,
+  getEnabledLoci,
+  LOCUS_DEFINITIONS,
 } from './genetics';
 import {
   decodeSaveStateV2,
@@ -142,4 +163,108 @@ test('Compact morph-tree v2 save is dramatically smaller than flat v1 serializat
     compactV2Size < flatV1Size * 0.25,
     `Expected compact v2 (${compactV2Size}B) to be <25% of flat v1 (${flatV1Size}B)`
   );
+});
+
+test('Real Morphs Only disables all custom genes across loci, starters, Jean Pool, and mutations', () => {
+  const realOnly = createGameConfigForMode('real_only', { jeanPool: true, hissDepot: true });
+  assert.equal(hasContentFlag(realOnly.contentFlags, ContentFlag.RealMorphs), true);
+  assert.equal(hasContentFlag(realOnly.contentFlags, ContentFlag.CustomMorphs), false);
+
+  const enabledLoci = getEnabledLoci(realOnly.contentFlags);
+  assert.equal(enabledLoci.length, 21, 'Real-only should include exactly the 21 real-world loci');
+  assert.ok(
+    enabledLoci.every((loc) => !LOCUS_DEFINITIONS[loc].isCustom),
+    'No custom loci may appear in real_only'
+  );
+
+  const starters = createRandomStarterPair(() => 0.42, realOnly.contentFlags);
+  assert.ok(starters.every((s) => !s.phenotype.isCustomMorph));
+
+  const missing = getMissingLoci(starters, realOnly.contentFlags);
+  assert.ok(missing.every((loc) => !LOCUS_DEFINITIONS[loc].isCustom));
+
+  const offers = buildJeanPoolOffers(starters, { purchasesCount: 0, stockSeed: 77 }, realOnly.contentFlags);
+  assert.ok(offers.length > 0);
+  assert.ok(offers.every((o) => !LOCUS_DEFINITIONS[o.locusId].isCustom && !o.snake.phenotype.isCustomMorph));
+
+  // Force spontaneous mutation rolls (rng always returns 0.0001 < 0.001) and verify zero custom mutations
+  let tick = 0;
+  const forcedMutationRng = () => {
+    tick += 1;
+    return tick % 3 === 0 ? 0.99 : 0.0001;
+  };
+  const eggs = breedClutch(
+    starters[0],
+    starters[1],
+    new Set(),
+    new Set(),
+    10,
+    forcedMutationRng,
+    undefined,
+    realOnly.contentFlags
+  );
+  for (const egg of eggs) {
+    assert.equal(egg.snake.phenotype.isCustomMorph, false, 'Real-only mutations must never produce custom morphs');
+  }
+});
+
+test('Disabling Jean Pool and Hiss Depot gates unlocks and resets Hiss Depot modifiers cleanly on decode', () => {
+  const noShopsConfig = createGameConfigForMode('real_only', {
+    jeanPool: false,
+    hissDepot: false,
+  });
+  const starters = createStarterSnakes();
+  // Create 8 snakes all marked onDisplay with heavily upgraded Hiss Depot state
+  const extraSnakes: SnakeEntity[] = Array.from({ length: 8 }, (_, idx) => ({
+    ...starters[idx % starters.length],
+    id: `snake_${idx}`,
+    name: `Noodle ${idx}`,
+    onDisplay: true,
+    hatchedAt: 1_700_000_000_000 + idx * 1000,
+  }));
+
+  const upgradedEco = createDefaultEconomyState(55);
+  upgradedEco.totalSnakesSold = 5;
+  upgradedEco.jeanPool.purchasesCount = 2;
+  upgradedEco.hissDepot.incubatorMaxLevel = 4;
+  upgradedEco.hissDepot.incubatorActiveLevel = 4;
+  upgradedEco.hissDepot.displaySlotsBought = 4;
+  upgradedEco.hissDepot.biasWeights = { dominant: 60, codominant: 20, recessive: 20 };
+
+  assert.equal(isJeanPoolUnlocked(upgradedEco, noShopsConfig.contentFlags), false);
+  assert.equal(isHissDepotUnlocked(upgradedEco, noShopsConfig.contentFlags), false);
+
+  const effDepot = getEffectiveHissDepot(upgradedEco, noShopsConfig.contentFlags);
+  assert.equal(getMaxDisplaySlots(effDepot), BASE_MAX_DISPLAY_SNAKES);
+  assert.equal(getActiveClutchConfig(effDepot).clutchSize, BASE_CLUTCH_SIZE);
+
+  // Round-trip encode/decode with Hiss Depot disabled must reset depot modifiers & clamp displayedIds to 6
+  const encoded = encodeSaveStateV2({
+    snakes: extraSnakes,
+    displayedIds: extraSnakes.map((s) => s.id),
+    discoveries: buildInitialDiscoveries(extraSnakes),
+    sireId: extraSnakes[0].id,
+    damId: extraSnakes[1].id,
+    clutchDurationSec: 360,
+    clutchRemainingSec: 100,
+    clutchesHatched: 4,
+    settings: { heatLampOn: true, muted: false },
+    economy: upgradedEco,
+    gameConfig: noShopsConfig,
+  });
+  const decoded = decodeSaveStateV2(encoded);
+  assert.ok(decoded);
+  assert.equal(decoded.gameConfig.mode, 'real_only');
+  assert.equal(decoded.economy.hissDepot.incubatorMaxLevel, 0);
+  assert.equal(decoded.economy.hissDepot.displaySlotsBought, 0);
+  assert.equal(decoded.displayedIds.length, BASE_MAX_DISPLAY_SNAKES);
+  assert.equal(
+    decoded.snakes.filter((s) => s.onDisplay).length,
+    BASE_MAX_DISPLAY_SNAKES
+  );
+
+  // Title showcase snakes have unique title_ IDs and are onDisplay
+  const showcase = createTitleShowcaseSnakes(5);
+  assert.equal(showcase.length, 5);
+  assert.ok(showcase.every((s) => s.id.startsWith('title_') && s.onDisplay));
 });

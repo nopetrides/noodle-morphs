@@ -1,16 +1,26 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { GalleryDrawer } from './components/GalleryDrawer';
 import { HatchRevealModal } from './components/HatchRevealModal';
+import { HissDepotIntroModal } from './components/HissDepotIntroModal';
 import { JeanPoolIntroModal } from './components/JeanPoolIntroModal';
 import { PauseModal } from './components/PauseModal';
+import { SaveSlotModal, type SaveSlotModalMode } from './components/SaveSlotModal';
 import { SellConfirmModal } from './components/SellConfirmModal';
 import { SnakeInspectorCard } from './components/SnakeInspectorCard';
+import { SpiderLethalModal } from './components/SpiderLethalModal';
 import { StarterPairModal } from './components/StarterPairModal';
 import { TerrariumCanvas } from './components/TerrariumCanvas';
 import { TerrariumDock } from './components/TerrariumDock';
 import { TitleOverlay } from './components/TitleOverlay';
 import { TopIncubatorHud } from './components/TopIncubatorHud';
 import { audioEngine } from './game/audio';
+import {
+  ContentFlag,
+  DEFAULT_GAME_CONFIG,
+  hasContentFlag,
+  type GameConfig,
+  type SaveSlotId,
+} from './game/contentFlags';
 import {
   adjustGeneBiasWeights,
   analyzeSaleWarnings,
@@ -23,8 +33,10 @@ import {
   getActiveClutchConfig,
   getBiasCapUpgradePrice,
   getDisplaySlotUpgradePrice,
+  getEffectiveHissDepot,
   getIncubatorUpgradePrice,
   getMaxDisplaySlots,
+  getMissingLoci,
   hasTriplicateMorph,
   isHissDepotUnlocked,
   isJeanPoolUnlocked,
@@ -37,12 +49,32 @@ import {
   safeAddCurrency,
   safeSpendCurrency,
 } from './game/economy';
+import { DEV_TOOLS_ENABLED } from './game/env';
 import {
   breedClutch,
   buildInitialDiscoveries,
   createRandomStarterPair,
+  createTitleShowcaseSnakes,
+  isLethalSpiderPairing,
+  pickSafeMateFor,
 } from './game/genetics';
-import { clearSavedState, loadSavedState, saveGameState } from './game/storage';
+import {
+  deleteSaveSlot,
+  getLastActiveSlotId,
+  getMostRecentSaveSlot,
+  listSaveSlots,
+  loadSaveSlot,
+  saveToSlot,
+  setLastActiveSlotId,
+  type SaveSlotSummary,
+} from './game/storage';
+import {
+  advanceUiEventQueue,
+  completeActiveUiEvent,
+  createUiEventQueueState,
+  enqueueUiEvent,
+  type UiEventQueueState,
+} from './game/uiEventQueue';
 import type {
   ActiveDrawerTab,
   ClutchEgg,
@@ -60,10 +92,11 @@ function getInitialAutostart(): boolean {
   return params.get('autostart') === '1';
 }
 
-function buildFreshGame() {
-  const starters = createRandomStarterPair();
+function buildFreshGame(gameConfig: GameConfig = DEFAULT_GAME_CONFIG) {
+  const starters = createRandomStarterPair(Math.random, gameConfig.contentFlags);
   const economy = createDefaultEconomyState(Math.floor(Math.random() * 100000) + 1);
-  const breedDur = computePairBreedDurationSec(starters[0], starters[1], economy.hissDepot);
+  const effectiveDepot = getEffectiveHissDepot(economy, gameConfig.contentFlags);
+  const breedDur = computePairBreedDurationSec(starters[0], starters[1], effectiveDepot);
   return {
     snakes: starters,
     discoveries: buildInitialDiscoveries(starters),
@@ -75,7 +108,7 @@ function buildFreshGame() {
     clutchesHatched: 0,
     settings: { heatLampOn: true, muted: false } as TerrariumSettings,
     economy,
-    isFreshNewGame: true,
+    gameConfig: { ...gameConfig },
   };
 }
 
@@ -84,52 +117,102 @@ type PendingSale =
   | { kind: 'hatchling'; egg: ClutchEgg };
 
 export default function App() {
-  const loadedFromDisk = useMemo(() => loadSavedState(), []);
-  const initialState = useMemo(
-    () =>
-      loadedFromDisk
-        ? { ...loadedFromDisk, isFreshNewGame: false }
-        : buildFreshGame(),
-    [loadedFromDisk]
-  );
+  const autostart = useMemo(() => getInitialAutostart(), []);
 
-  const autostart = getInitialAutostart();
-  const [phase, setPhase] = useState<GamePhase>(() => (autostart ? 'playing' : 'title'));
-  const [needsStarterConfirm, setNeedsStarterConfirm] = useState<boolean>(
-    () => initialState.isFreshNewGame && !autostart
+  // Optional autostart boot (for dev preview URLs); normal players begin cleanly on Title Screen
+  const autostartBoot = useMemo(() => {
+    if (!autostart) return null;
+    const preferred = getLastActiveSlotId() ?? getMostRecentSaveSlot();
+    if (preferred) {
+      const loaded = loadSaveSlot(preferred);
+      if (loaded) return { slotId: preferred, state: loaded, isFresh: false };
+    }
+    return { slotId: 1 as SaveSlotId, state: buildFreshGame(DEFAULT_GAME_CONFIG), isFresh: true };
+  }, [autostart]);
+
+  const [phase, setPhase] = useState<GamePhase>(() => (autostartBoot ? 'playing' : 'title'));
+  const [titleSnakes, setTitleSnakes] = useState<SnakeEntity[]>(() =>
+    autostartBoot ? [] : createTitleShowcaseSnakes(5)
   );
-  const [snakes, setSnakes] = useState<SnakeEntity[]>(initialState.snakes);
-  const [discoveries, setDiscoveries] = useState<Record<string, MorphDiscovery>>(
-    initialState.discoveries
+  const [saveSlots, setSaveSlots] = useState<SaveSlotSummary[]>(() => listSaveSlots());
+  const [activeSlotId, setActiveSlotId] = useState<SaveSlotId | null>(() =>
+    autostartBoot ? autostartBoot.slotId : null
   );
-  const [sireId, setSireId] = useState<string>(initialState.sireId);
-  const [damId, setDamId] = useState<string>(initialState.damId);
-  const [clutchDurationSec, setClutchDurationSec] = useState<number>(
-    initialState.clutchDurationSec
+  const [slotModalMode, setSlotModalMode] = useState<SaveSlotModalMode | null>(null);
+
+  const [gameConfig, setGameConfig] = useState<GameConfig>(() =>
+    autostartBoot ? autostartBoot.state.gameConfig : { ...DEFAULT_GAME_CONFIG }
   );
-  const [clutchRemainingSec, setClutchRemainingSec] = useState<number>(
-    initialState.clutchRemainingSec
+  const [needsStarterConfirm, setNeedsStarterConfirm] = useState<boolean>(false);
+  const [snakes, setSnakes] = useState<SnakeEntity[]>(() =>
+    autostartBoot ? autostartBoot.state.snakes : []
   );
-  const [clutchReady, setClutchReady] = useState<boolean>(initialState.clutchReady);
-  const [clutchesHatched, setClutchesHatched] = useState<number>(
-    initialState.clutchesHatched
+  const [discoveries, setDiscoveries] = useState<Record<string, MorphDiscovery>>(() =>
+    autostartBoot ? autostartBoot.state.discoveries : {}
   );
-  const [settings, setSettings] = useState<TerrariumSettings>(initialState.settings);
-  const [economy, setEconomy] = useState<EconomyState>(initialState.economy);
+  const [sireId, setSireId] = useState<string>(() => (autostartBoot ? autostartBoot.state.sireId : ''));
+  const [damId, setDamId] = useState<string>(() => (autostartBoot ? autostartBoot.state.damId : ''));
+  const [clutchDurationSec, setClutchDurationSec] = useState<number>(() =>
+    autostartBoot ? autostartBoot.state.clutchDurationSec : 120
+  );
+  const [clutchRemainingSec, setClutchRemainingSec] = useState<number>(() =>
+    autostartBoot ? autostartBoot.state.clutchRemainingSec : 120
+  );
+  const [clutchReady, setClutchReady] = useState<boolean>(() =>
+    autostartBoot ? autostartBoot.state.clutchReady : false
+  );
+  const [clutchesHatched, setClutchesHatched] = useState<number>(() =>
+    autostartBoot ? autostartBoot.state.clutchesHatched : 0
+  );
+  const [settings, setSettings] = useState<TerrariumSettings>(() =>
+    autostartBoot ? autostartBoot.state.settings : { heatLampOn: true, muted: false }
+  );
+  const [economy, setEconomy] = useState<EconomyState>(() =>
+    autostartBoot ? autostartBoot.state.economy : createDefaultEconomyState()
+  );
 
   const [selectedSnakeId, setSelectedSnakeId] = useState<string | null>(null);
   const [activeDrawer, setActiveDrawer] = useState<ActiveDrawerTab | null>(null);
   const [activeClutch, setActiveClutch] = useState<ClutchEgg[] | null>(null);
   const [pendingSale, setPendingSale] = useState<PendingSale | null>(null);
   const [mistTriggerCount, setMistTriggerCount] = useState(0);
+  const [uiEventState, setUiEventState] = useState<UiEventQueueState>(() =>
+    createUiEventQueueState()
+  );
+  const [dockHighlightTab, setDockHighlightTab] = useState<ActiveDrawerTab | null>(null);
+  const [spiderBlockedNotice, setSpiderBlockedNotice] = useState<{
+    attemptedA: string;
+    attemptedB: string;
+    replacementName: string | null;
+  } | null>(null);
+
+  const refreshSaveSlots = useCallback(() => {
+    setSaveSlots(listSaveSlots());
+  }, []);
+
+  const hasSaves = useMemo(() => saveSlots.some((s) => !s.isEmpty), [saveSlots]);
+  const continueSlot = useMemo(() => {
+    const preferred = getLastActiveSlotId() ?? getMostRecentSaveSlot();
+    if (!preferred) return null;
+    const found = saveSlots.find((s) => s.slotId === preferred && !s.isEmpty);
+    return found ?? saveSlots.find((s) => !s.isEmpty) ?? null;
+  }, [saveSlots]);
+
+  const jeanPoolEnabled = hasContentFlag(gameConfig.contentFlags, ContentFlag.JeanPool);
+  const hissDepotEnabled = hasContentFlag(gameConfig.contentFlags, ContentFlag.HissDepot);
+
+  const effectiveHissDepot = useMemo(
+    () => getEffectiveHissDepot(economy, gameConfig.contentFlags),
+    [economy, gameConfig.contentFlags]
+  );
 
   const maxDisplay = useMemo(
-    () => getMaxDisplaySlots(economy.hissDepot),
-    [economy.hissDepot]
+    () => getMaxDisplaySlots(effectiveHissDepot),
+    [effectiveHissDepot]
   );
   const activeClutchConfig = useMemo(
-    () => getActiveClutchConfig(economy.hissDepot),
-    [economy.hissDepot]
+    () => getActiveClutchConfig(effectiveHissDepot),
+    [effectiveHissDepot]
   );
 
   useEffect(() => {
@@ -145,10 +228,12 @@ export default function App() {
     [snakes]
   );
 
-  // Persist save state to localStorage once starter pair is confirmed
+  // Auto-save active gameplay state to its slot once starter pair is confirmed
   useEffect(() => {
-    if (needsStarterConfirm) return;
-    saveGameState({
+    if (phase === 'title' || needsStarterConfirm || activeSlotId === null || snakes.length < 2) {
+      return;
+    }
+    saveToSlot(activeSlotId, {
       snakes,
       displayedIds,
       discoveries,
@@ -160,9 +245,12 @@ export default function App() {
       clutchesHatched,
       settings,
       economy,
+      gameConfig,
     });
   }, [
+    phase,
     needsStarterConfirm,
+    activeSlotId,
     snakes,
     displayedIds,
     discoveries,
@@ -174,28 +262,29 @@ export default function App() {
     clutchesHatched,
     settings,
     economy,
+    gameConfig,
   ]);
 
-  const sire = useMemo(
-    () => snakes.find((s) => s.id === sireId) ?? snakes[0],
+  const sire = useMemo<SnakeEntity | null>(
+    () => snakes.find((s) => s.id === sireId) ?? snakes[0] ?? null,
     [snakes, sireId]
   );
-  const dam = useMemo(
+  const dam = useMemo<SnakeEntity | null>(
     () =>
-      snakes.find((s) => s.id === damId && s.id !== sire.id) ??
-      snakes.find((s) => s.id !== sire.id) ??
-      snakes[0],
-    [snakes, damId, sire.id]
+      (sire
+        ? snakes.find((s) => s.id === damId && s.id !== sire.id) ??
+          snakes.find((s) => s.id !== sire.id)
+        : null) ??
+      snakes[1] ??
+      sire,
+    [snakes, damId, sire]
   );
 
-  const pairCanBreedNow = canSnakeBreed(sire) && canSnakeBreed(dam);
+  const pairCanBreedNow = Boolean(sire && dam && canSnakeBreed(sire) && canSnakeBreed(dam));
 
-  // Unified 1Hz idle simulation tick:
-  // 1) Incubator countdown (only when pair has enough vigour & clutch isn't already ready)
-  // 2) Vigour recovery for every snake NOT actively breeding (including parents during ready/reveal/recovery!)
-  // 3) The Jean Pool restock cooldown countdown
+  // Unified 1Hz idle simulation tick
   useEffect(() => {
-    if (phase !== 'playing' || needsStarterConfirm) return;
+    if (phase !== 'playing' || needsStarterConfirm || !sire || !dam) return;
 
     const timer = window.setInterval(() => {
       const isActivelyBreeding =
@@ -206,7 +295,6 @@ export default function App() {
         setClutchRemainingSec((prev) => {
           const next = Math.max(0, prev - 1);
           if (next <= 0 && prev > 0) {
-            // Clutch finished! Deduct vigour once from active breeders & mark ready
             setClutchReady(true);
             setSnakes((currSnakes) =>
               currSnakes.map((s) =>
@@ -220,23 +308,25 @@ export default function App() {
         });
       }
 
-      // 2. Recover vigour for non-breeding snakes (and for parents whenever ready/modal/recovering!)
+      // 2. Recover vigour for non-breeding snakes
       const activeIds = isActivelyBreeding
         ? new Set<string>([sire.id, dam.id])
         : new Set<string>();
       setSnakes((currSnakes) => recoverSnakesVigor(currSnakes, activeIds, 1));
 
-      // 3. Tick Jean Pool restock cooldown
-      setEconomy((prev) => {
-        if (prev.jeanPool.cooldownRemainingSec <= 0) return prev;
-        return {
-          ...prev,
-          jeanPool: {
-            ...prev.jeanPool,
-            cooldownRemainingSec: Math.max(0, prev.jeanPool.cooldownRemainingSec - 1),
-          },
-        };
-      });
+      // 3. Tick Jean Pool restock cooldown (only when Jean Pool is enabled)
+      if (jeanPoolEnabled) {
+        setEconomy((prev) => {
+          if (prev.jeanPool.cooldownRemainingSec <= 0) return prev;
+          return {
+            ...prev,
+            jeanPool: {
+              ...prev.jeanPool,
+              cooldownRemainingSec: Math.max(0, prev.jeanPool.cooldownRemainingSec - 1),
+            },
+          };
+        });
+      }
     }, 1000);
 
     return () => window.clearInterval(timer);
@@ -247,22 +337,232 @@ export default function App() {
     activeClutch,
     pairCanBreedNow,
     clutchRemainingSec,
-    sire.id,
-    dam.id,
+    sire,
+    dam,
+    jeanPoolEnabled,
   ]);
 
-  const handleStart = useCallback(() => {
-    document.body.dataset.state = 'playing';
-    if (document.activeElement instanceof HTMLElement) {
-      document.activeElement.blur();
+  // --- Save Slot, Title, New Game, and Load Transitions ---
+
+  const handleLoadSlot = useCallback(
+    (slotId: SaveSlotId) => {
+      const loaded = loadSaveSlot(slotId);
+      if (!loaded) return;
+
+      audioEngine.playSoftClick();
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+
+      // Clear title screen showcase morphs & all transient gameplay UI
+      setTitleSnakes([]);
+      setSlotModalMode(null);
+      setSelectedSnakeId(null);
+      setActiveDrawer(null);
+      setActiveClutch(null);
+      setPendingSale(null);
+      setNeedsStarterConfirm(false);
+      setUiEventState(createUiEventQueueState());
+      setDockHighlightTab(null);
+      setSpiderBlockedNotice(null);
+
+      // Reinitialize every system strictly from this save's settings & flags
+      const nextConfig = loaded.gameConfig;
+      const nextHissEnabled = hasContentFlag(nextConfig.contentFlags, ContentFlag.HissDepot);
+      const cleanEconomy: EconomyState = nextHissEnabled
+        ? loaded.economy
+        : { ...loaded.economy, hissDepot: createDefaultHissDepotState() };
+
+      const loadedSire = loaded.snakes.find((s) => s.id === loaded.sireId) ?? loaded.snakes[0];
+      const loadedDam =
+        loaded.snakes.find((s) => s.id === loaded.damId && s.id !== loadedSire.id) ??
+        loaded.snakes.find((s) => s.id !== loadedSire.id) ??
+        loaded.snakes[0];
+
+      const effectiveDepot = getEffectiveHissDepot(cleanEconomy, nextConfig.contentFlags);
+      const cleanDur = nextHissEnabled
+        ? loaded.clutchDurationSec
+        : computePairBreedDurationSec(loadedSire, loadedDam, effectiveDepot);
+
+      setActiveSlotId(slotId);
+      setLastActiveSlotId(slotId);
+      setGameConfig(nextConfig);
+      setSnakes(loaded.snakes);
+      setDiscoveries(loaded.discoveries);
+      setSireId(loadedSire.id);
+      setDamId(loadedDam.id);
+      setClutchDurationSec(cleanDur);
+      setClutchRemainingSec(Math.min(loaded.clutchRemainingSec, cleanDur));
+      setClutchReady(loaded.clutchReady);
+      setClutchesHatched(loaded.clutchesHatched);
+      setSettings(loaded.settings);
+      setEconomy(cleanEconomy);
+      setPhase('playing');
+      refreshSaveSlots();
+    },
+    [refreshSaveSlots]
+  );
+
+  const handleContinueFromTitle = useCallback(() => {
+    const target = continueSlot?.slotId ?? getLastActiveSlotId() ?? getMostRecentSaveSlot();
+    if (target) {
+      handleLoadSlot(target);
     }
+  }, [continueSlot, handleLoadSlot]);
+
+  const handleStartNewGame = useCallback(
+    (slotId: SaveSlotId, config: GameConfig) => {
+      audioEngine.playSoftClick();
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+
+      const fresh = buildFreshGame(config);
+      setTitleSnakes([]);
+      setSlotModalMode(null);
+      setSelectedSnakeId(null);
+      setActiveDrawer(null);
+      setActiveClutch(null);
+      setPendingSale(null);
+      setUiEventState(createUiEventQueueState());
+      setDockHighlightTab(null);
+      setSpiderBlockedNotice(null);
+
+      setActiveSlotId(slotId);
+      setLastActiveSlotId(slotId);
+      setGameConfig(fresh.gameConfig);
+      setSnakes(fresh.snakes);
+      setDiscoveries(fresh.discoveries);
+      setSireId(fresh.sireId);
+      setDamId(fresh.damId);
+      setClutchDurationSec(fresh.clutchDurationSec);
+      setClutchRemainingSec(fresh.clutchRemainingSec);
+      setClutchReady(false);
+      setClutchesHatched(0);
+      setSettings(fresh.settings);
+      setEconomy(fresh.economy);
+      setNeedsStarterConfirm(true);
+      setPhase('playing');
+    },
+    []
+  );
+
+  const handleSaveToSlot = useCallback(
+    (slotId: SaveSlotId) => {
+      if (snakes.length < 2) return;
+      audioEngine.playPetChime();
+      saveToSlot(slotId, {
+        snakes,
+        displayedIds,
+        discoveries,
+        sireId,
+        damId,
+        clutchDurationSec,
+        clutchRemainingSec,
+        clutchReady,
+        clutchesHatched,
+        settings,
+        economy,
+        gameConfig,
+      });
+      setActiveSlotId(slotId);
+      setLastActiveSlotId(slotId);
+      refreshSaveSlots();
+      setSlotModalMode(null);
+    },
+    [
+      snakes,
+      displayedIds,
+      discoveries,
+      sireId,
+      damId,
+      clutchDurationSec,
+      clutchRemainingSec,
+      clutchReady,
+      clutchesHatched,
+      settings,
+      economy,
+      gameConfig,
+      refreshSaveSlots,
+    ]
+  );
+
+  const handleDeleteSlot = useCallback(
+    (slotId: SaveSlotId) => {
+      audioEngine.playSoftClick();
+      deleteSaveSlot(slotId);
+      if (activeSlotId === slotId) {
+        setActiveSlotId(null);
+      }
+      refreshSaveSlots();
+    },
+    [activeSlotId, refreshSaveSlots]
+  );
+
+  const handleReturnToTitle = useCallback(() => {
     audioEngine.playSoftClick();
-    setPhase('playing');
-  }, []);
+    // Flush active save cleanly before tearing down state
+    if (activeSlotId !== null && !needsStarterConfirm && snakes.length >= 2) {
+      saveToSlot(activeSlotId, {
+        snakes,
+        displayedIds,
+        discoveries,
+        sireId,
+        damId,
+        clutchDurationSec,
+        clutchRemainingSec,
+        clutchReady,
+        clutchesHatched,
+        settings,
+        economy,
+        gameConfig,
+      });
+    }
+
+    // Complete teardown of active save state & modifiers, then spawn fresh random title snakes
+    setActiveSlotId(null);
+    setSnakes([]);
+    setDiscoveries({});
+    setSireId('');
+    setDamId('');
+    setClutchDurationSec(120);
+    setClutchRemainingSec(120);
+    setClutchReady(false);
+    setClutchesHatched(0);
+    setEconomy(createDefaultEconomyState());
+    setGameConfig({ ...DEFAULT_GAME_CONFIG });
+    setSelectedSnakeId(null);
+    setActiveDrawer(null);
+    setActiveClutch(null);
+    setPendingSale(null);
+    setSlotModalMode(null);
+    setNeedsStarterConfirm(false);
+    setUiEventState(createUiEventQueueState());
+    setDockHighlightTab(null);
+    setTitleSnakes(createTitleShowcaseSnakes(5));
+    refreshSaveSlots();
+    setPhase('title');
+  }, [
+    activeSlotId,
+    needsStarterConfirm,
+    snakes,
+    displayedIds,
+    discoveries,
+    sireId,
+    damId,
+    clutchDurationSec,
+    clutchRemainingSec,
+    clutchReady,
+    clutchesHatched,
+    settings,
+    economy,
+    gameConfig,
+    refreshSaveSlots,
+  ]);
 
   const handleRerollStarters = useCallback(() => {
     audioEngine.playSoftClick();
-    const fresh = buildFreshGame();
+    const fresh = buildFreshGame(gameConfig);
     setSnakes(fresh.snakes);
     setDiscoveries(fresh.discoveries);
     setSireId(fresh.sireId);
@@ -271,12 +571,44 @@ export default function App() {
     setClutchRemainingSec(fresh.clutchRemainingSec);
     setClutchReady(false);
     setEconomy(fresh.economy);
-  }, []);
+  }, [gameConfig]);
 
   const handleConfirmStarters = useCallback(() => {
     audioEngine.playSoftClick();
     setNeedsStarterConfirm(false);
-  }, []);
+    if (activeSlotId !== null && snakes.length >= 2) {
+      saveToSlot(activeSlotId, {
+        snakes,
+        displayedIds,
+        discoveries,
+        sireId,
+        damId,
+        clutchDurationSec,
+        clutchRemainingSec,
+        clutchReady,
+        clutchesHatched,
+        settings,
+        economy,
+        gameConfig,
+      });
+      refreshSaveSlots();
+    }
+  }, [
+    activeSlotId,
+    snakes,
+    displayedIds,
+    discoveries,
+    sireId,
+    damId,
+    clutchDurationSec,
+    clutchRemainingSec,
+    clutchReady,
+    clutchesHatched,
+    settings,
+    economy,
+    gameConfig,
+    refreshSaveSlots,
+  ]);
 
   const handleToggleMute = useCallback(() => {
     setSettings((prev) => ({ ...prev, muted: !prev.muted }));
@@ -292,12 +624,6 @@ export default function App() {
           target.tagName === 'SELECT');
       if (isTyping) return;
 
-      if (phase === 'title' && (e.key === 'Enter' || e.key === ' ')) {
-        e.preventDefault();
-        handleStart();
-        return;
-      }
-
       if (e.key === 'm' || e.key === 'M') {
         e.preventDefault();
         handleToggleMute();
@@ -305,6 +631,12 @@ export default function App() {
       }
 
       if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
+        if (slotModalMode && e.key === 'Escape') {
+          e.preventDefault();
+          setSlotModalMode(null);
+          return;
+        }
+        if (phase === 'title') return;
         if (pendingSale && e.key === 'Escape') {
           e.preventDefault();
           setPendingSale(null);
@@ -320,6 +652,7 @@ export default function App() {
           setSelectedSnakeId(null);
           return;
         }
+        refreshSaveSlots();
         setPhase((curr) => (curr === 'playing' ? 'paused' : curr === 'paused' ? 'playing' : curr));
       }
     };
@@ -328,13 +661,14 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     phase,
+    slotModalMode,
     activeClutch,
     activeDrawer,
     selectedSnakeId,
     pendingSale,
     needsStarterConfirm,
-    handleStart,
     handleToggleMute,
+    refreshSaveSlots,
   ]);
 
   const displayedCount = displayedIds.length;
@@ -388,6 +722,7 @@ export default function App() {
 
   const handleAssignParent = useCallback(
     (role: 'sire' | 'dam', snakeId: string) => {
+      if (!sire || !dam) return;
       audioEngine.playSoftClick();
       let nextSireId = sire.id;
       let nextDamId = dam.id;
@@ -398,23 +733,53 @@ export default function App() {
         if (snakeId === sire.id) nextSireId = dam.id;
         nextDamId = snakeId;
       }
+
+      let nextSire = snakes.find((s) => s.id === nextSireId) ?? sire;
+      let nextDam = snakes.find((s) => s.id === nextDamId) ?? dam;
+
+      // Ethical Breeding Guard: disallow homozygous lethal Spider × Spider pairings & auto-pick safe mate
+      if (isLethalSpiderPairing(nextSire, nextDam)) {
+        const chosen = role === 'sire' ? nextSire : nextDam;
+        const other = role === 'sire' ? nextDam : nextSire;
+        const safeMate = pickSafeMateFor(chosen, snakes);
+        if (safeMate) {
+          if (role === 'sire') {
+            nextSire = chosen;
+            nextDam = safeMate;
+          } else {
+            nextDam = chosen;
+            nextSire = safeMate;
+          }
+          nextSireId = nextSire.id;
+          nextDamId = nextDam.id;
+        } else {
+          // No non-Spider mate available: keep existing safe pair
+          nextSire = sire;
+          nextDam = dam;
+          nextSireId = sire.id;
+          nextDamId = dam.id;
+        }
+        setSpiderBlockedNotice({
+          attemptedA: chosen.name,
+          attemptedB: other.name,
+          replacementName: safeMate ? safeMate.name : null,
+        });
+      }
+
       setSireId(nextSireId);
       setDamId(nextDamId);
 
-      // Recompute breed duration cleanly for the newly chosen pair if not already ready
       if (!clutchReady) {
-        const nextSire = snakes.find((s) => s.id === nextSireId) ?? sire;
-        const nextDam = snakes.find((s) => s.id === nextDamId) ?? dam;
-        const nextDur = computePairBreedDurationSec(nextSire, nextDam, economy.hissDepot);
+        const nextDur = computePairBreedDurationSec(nextSire, nextDam, effectiveHissDepot);
         setClutchDurationSec(nextDur);
         setClutchRemainingSec((prev) => Math.min(prev, nextDur));
       }
     },
-    [sire, dam, snakes, clutchReady, economy.hissDepot]
+    [sire, dam, snakes, clutchReady, effectiveHissDepot]
   );
 
   const handleWarmIncubator = useCallback(() => {
-    if (!pairCanBreedNow || clutchReady) return;
+    if (!DEV_TOOLS_ENABLED || !pairCanBreedNow || clutchReady || !sire || !dam) return;
     audioEngine.playSoftClick();
     setClutchRemainingSec((prev) => {
       const next = Math.max(0, prev - 5);
@@ -430,9 +795,10 @@ export default function App() {
       }
       return next;
     });
-  }, [pairCanBreedNow, clutchReady, sire.id, dam.id]);
+  }, [pairCanBreedNow, clutchReady, sire, dam]);
 
   const handleOpenHatch = useCallback(() => {
+    if (!sire || !dam) return;
     audioEngine.playSoftClick();
     const existingNames = new Set(snakes.map((s) => s.name));
     const eggs = breedClutch(
@@ -442,7 +808,8 @@ export default function App() {
       existingNames,
       activeClutchConfig.clutchSize,
       Math.random,
-      economy.hissDepot.biasWeights
+      hissDepotEnabled ? effectiveHissDepot.biasWeights : undefined,
+      gameConfig.contentFlags
     );
     setActiveDrawer(null);
     setSelectedSnakeId(null);
@@ -453,7 +820,9 @@ export default function App() {
     dam,
     discoveredKeys,
     activeClutchConfig.clutchSize,
-    economy.hissDepot.biasWeights,
+    hissDepotEnabled,
+    effectiveHissDepot.biasWeights,
+    gameConfig.contentFlags,
   ]);
 
   const handleRevealEgg = useCallback((eggId: string) => {
@@ -511,7 +880,6 @@ export default function App() {
     [displayedCount, maxDisplay]
   );
 
-  // Record a snake's morph into Morphdex helper
   const archiveSnakeDiscovery = useCallback(
     (prev: Record<string, MorphDiscovery>, snake: SnakeEntity): Record<string, MorphDiscovery> => {
       const key = snake.phenotype.morphKey;
@@ -550,7 +918,6 @@ export default function App() {
     []
   );
 
-  // Confirm sale (from either Collection or Hatch Reveal)
   const handleConfirmSale = useCallback(() => {
     if (!pendingSale) return;
     audioEngine.playPetChime();
@@ -565,25 +932,30 @@ export default function App() {
         return;
       }
       const remainingSnakes = snakes.filter((s) => s.id !== targetSnake.id);
-      // Ensure at least 1 displayed snake remains
       if (!remainingSnakes.some((s) => s.onDisplay) && remainingSnakes.length > 0) {
         remainingSnakes[0] = { ...remainingSnakes[0], onDisplay: true };
       }
       setSnakes(remainingSnakes);
 
-      // Reassign sire/dam cleanly if we sold one of the active parents
       if (targetSnake.id === sireId && remainingSnakes.length >= 2) {
-        const replacement = remainingSnakes.find((s) => s.id !== damId) ?? remainingSnakes[0];
+        const anchorDam = remainingSnakes.find((s) => s.id === damId) ?? remainingSnakes[0];
+        const replacement =
+          pickSafeMateFor(anchorDam, remainingSnakes) ??
+          remainingSnakes.find((s) => s.id !== damId) ??
+          remainingSnakes[0];
         setSireId(replacement.id);
       } else if (targetSnake.id === damId && remainingSnakes.length >= 2) {
-        const replacement = remainingSnakes.find((s) => s.id !== sireId) ?? remainingSnakes[0];
+        const anchorSire = remainingSnakes.find((s) => s.id === sireId) ?? remainingSnakes[0];
+        const replacement =
+          pickSafeMateFor(anchorSire, remainingSnakes) ??
+          remainingSnakes.find((s) => s.id !== sireId) ??
+          remainingSnakes[0];
         setDamId(replacement.id);
       }
       if (selectedSnakeId === targetSnake.id) {
         setSelectedSnakeId(null);
       }
     } else {
-      // Selling directly from Hatch Reveal marks the egg sold & still logs its discovery!
       const eggId = pendingSale.egg.id;
       setActiveClutch((prev) =>
         prev
@@ -641,14 +1013,26 @@ export default function App() {
         return next;
       });
 
-      const resolvedSire =
+      let resolvedSire =
         nextSnakesList.find((s) => s.id === nextSireId) ?? nextSnakesList[0];
-      const resolvedDam =
+      let resolvedDam =
         nextSnakesList.find((s) => s.id === nextDamId && s.id !== resolvedSire.id) ??
         nextSnakesList.find((s) => s.id !== resolvedSire.id) ??
         nextSnakesList[0];
 
-      const nextDur = computePairBreedDurationSec(resolvedSire, resolvedDam, economy.hissDepot);
+      if (isLethalSpiderPairing(resolvedSire, resolvedDam)) {
+        const safeMate = pickSafeMateFor(resolvedSire, nextSnakesList);
+        setSpiderBlockedNotice({
+          attemptedA: resolvedSire.name,
+          attemptedB: resolvedDam.name,
+          replacementName: safeMate ? safeMate.name : null,
+        });
+        if (safeMate) {
+          resolvedDam = safeMate;
+        }
+      }
+
+      const nextDur = computePairBreedDurationSec(resolvedSire, resolvedDam, effectiveHissDepot);
       setSireId(resolvedSire.id);
       setDamId(resolvedDam.id);
       setClutchesHatched((c) => c + 1);
@@ -657,12 +1041,13 @@ export default function App() {
       setClutchReady(false);
       setActiveClutch(null);
     },
-    [activeClutch, snakes, economy.hissDepot, archiveSnakeDiscovery]
+    [activeClutch, snakes, effectiveHissDepot, archiveSnakeDiscovery]
   );
 
   // --- The Jean Pool Purchase ---
   const handleBuyJeanPoolOffer = useCallback(
     (offer: JeanPoolOffer) => {
+      if (!jeanPoolEnabled) return;
       if (economy.jeanPool.cooldownRemainingSec > 0) return;
       const spend = safeSpendCurrency(economy.money, offer.price);
       if (!spend.ok) return;
@@ -688,12 +1073,13 @@ export default function App() {
         },
       }));
     },
-    [economy, displayedCount, maxDisplay, archiveSnakeDiscovery]
+    [jeanPoolEnabled, economy, displayedCount, maxDisplay, archiveSnakeDiscovery]
   );
 
-  // --- Developer Debug Spawn from Gene Simulator ---
+  // --- Developer Debug Spawn from Gene Simulator (Dev builds only) ---
   const handleDebugAddSnake = useCallback(
     (simulatedSnake: SnakeEntity) => {
+      if (!DEV_TOOLS_ENABLED) return;
       audioEngine.playPetChime();
       const canShow = displayedCount < maxDisplay;
       const spawned: SnakeEntity = {
@@ -706,8 +1092,9 @@ export default function App() {
     [displayedCount, maxDisplay, archiveSnakeDiscovery]
   );
 
-  // --- The Hiss Depot Upgrades & Tuning ---
+  // --- The Hiss Depot Upgrades & Tuning (all guarded by hissDepotEnabled) ---
   const handleBuyIncubatorUpgrade = useCallback(() => {
+    if (!hissDepotEnabled) return;
     const curLvl = economy.hissDepot.incubatorMaxLevel;
     if (curLvl >= MAX_INCUBATOR_UPGRADES) return;
     const price = getIncubatorUpgradePrice(curLvl);
@@ -725,23 +1112,28 @@ export default function App() {
         incubatorActiveLevel: nextMax,
       },
     }));
-  }, [economy]);
+  }, [hissDepotEnabled, economy]);
 
-  const handleSetIncubatorActive = useCallback((level: number) => {
-    audioEngine.playSoftClick();
-    setEconomy((prev) => {
-      const clamped = Math.max(0, Math.min(prev.hissDepot.incubatorMaxLevel, Math.floor(level)));
-      const nextDepot = { ...prev.hissDepot, incubatorActiveLevel: clamped };
-      if (!clutchReady) {
-        const nextDur = computePairBreedDurationSec(sire, dam, nextDepot);
-        setClutchDurationSec(nextDur);
-        setClutchRemainingSec((rem) => Math.min(rem, nextDur));
-      }
-      return { ...prev, hissDepot: nextDepot };
-    });
-  }, [clutchReady, sire, dam]);
+  const handleSetIncubatorActive = useCallback(
+    (level: number) => {
+      if (!hissDepotEnabled || !sire || !dam) return;
+      audioEngine.playSoftClick();
+      setEconomy((prev) => {
+        const clamped = Math.max(0, Math.min(prev.hissDepot.incubatorMaxLevel, Math.floor(level)));
+        const nextDepot = { ...prev.hissDepot, incubatorActiveLevel: clamped };
+        if (!clutchReady) {
+          const nextDur = computePairBreedDurationSec(sire, dam, nextDepot);
+          setClutchDurationSec(nextDur);
+          setClutchRemainingSec((rem) => Math.min(rem, nextDur));
+        }
+        return { ...prev, hissDepot: nextDepot };
+      });
+    },
+    [hissDepotEnabled, clutchReady, sire, dam]
+  );
 
   const handleBuyDisplaySlot = useCallback(() => {
+    if (!hissDepotEnabled) return;
     const bought = economy.hissDepot.displaySlotsBought;
     if (bought >= MAX_DISPLAY_UPGRADES) return;
     const price = getDisplaySlotUpgradePrice(bought);
@@ -757,10 +1149,11 @@ export default function App() {
         displaySlotsBought: prev.hissDepot.displaySlotsBought + 1,
       },
     }));
-  }, [economy]);
+  }, [hissDepotEnabled, economy]);
 
   const handleBuyBiasCap = useCallback(
     (mode: InheritanceMode) => {
+      if (!hissDepotEnabled) return;
       const bought = economy.hissDepot.biasCapsBought[mode];
       if (bought >= MAX_BIAS_CAP_UPGRADES) return;
       const price = getBiasCapUpgradePrice(bought);
@@ -780,25 +1173,30 @@ export default function App() {
         },
       }));
     },
-    [economy]
+    [hissDepotEnabled, economy]
   );
 
-  const handleAdjustBiasWeight = useCallback((mode: InheritanceMode, value: number) => {
-    setEconomy((prev) => ({
-      ...prev,
-      hissDepot: {
-        ...prev.hissDepot,
-        biasWeights: adjustGeneBiasWeights(
-          prev.hissDepot.biasWeights,
-          prev.hissDepot.biasCapsBought,
-          mode,
-          value
-        ),
-      },
-    }));
-  }, []);
+  const handleAdjustBiasWeight = useCallback(
+    (mode: InheritanceMode, value: number) => {
+      if (!hissDepotEnabled) return;
+      setEconomy((prev) => ({
+        ...prev,
+        hissDepot: {
+          ...prev.hissDepot,
+          biasWeights: adjustGeneBiasWeights(
+            prev.hissDepot.biasWeights,
+            prev.hissDepot.biasCapsBought,
+            mode,
+            value
+          ),
+        },
+      }));
+    },
+    [hissDepotEnabled]
+  );
 
   const handleResetBiasWeights = useCallback(() => {
+    if (!hissDepotEnabled) return;
     audioEngine.playSoftClick();
     const def = createDefaultHissDepotState().biasWeights;
     setEconomy((prev) => ({
@@ -808,7 +1206,7 @@ export default function App() {
         biasWeights: def,
       },
     }));
-  }, []);
+  }, [hissDepotEnabled]);
 
   const handleMist = useCallback(() => {
     audioEngine.playMistSpritz();
@@ -821,8 +1219,10 @@ export default function App() {
   }, []);
 
   const handleResetTerrarium = useCallback(() => {
-    clearSavedState();
-    const fresh = buildFreshGame();
+    if (activeSlotId !== null) {
+      deleteSaveSlot(activeSlotId);
+    }
+    const fresh = buildFreshGame(gameConfig);
     setSnakes(fresh.snakes);
     setDiscoveries(fresh.discoveries);
     setSireId(fresh.sireId);
@@ -837,48 +1237,110 @@ export default function App() {
     setActiveDrawer(null);
     setActiveClutch(null);
     setPendingSale(null);
+    setUiEventState(createUiEventQueueState());
+    setDockHighlightTab(null);
     setNeedsStarterConfirm(true);
+    refreshSaveSlots();
     setPhase('playing');
-  }, []);
+  }, [activeSlotId, gameConfig, refreshSaveSlots]);
 
   const discoveredCount = Object.keys(discoveries).length;
 
-  // Permanently unlock Sell buttons the moment the first extra (triplicate, 3+) of any morph is born/revealed
+  // Permanently unlock Sell buttons once the first extra (triplicate, 3+) of any morph is born/revealed
   useEffect(() => {
-    if (economy.sellUnlocked) return;
+    if (phase === 'title' || economy.sellUnlocked) return;
     const revealedClutchSnakes = (activeClutch ?? [])
       .filter((e) => e.revealed && !e.sold)
       .map((e) => e.snake);
     if (hasTriplicateMorph([...snakes, ...revealedClutchSnakes])) {
       setEconomy((prev) => (prev.sellUnlocked ? prev : { ...prev, sellUnlocked: true }));
     }
-  }, [economy.sellUnlocked, snakes, activeClutch]);
+  }, [phase, economy.sellUnlocked, snakes, activeClutch]);
 
-  const jeanPoolUnlocked = isJeanPoolUnlocked(economy);
-  const hissDepotUnlocked = isHissDepotUnlocked(economy);
+  const jeanPoolUnlocked = isJeanPoolUnlocked(economy, gameConfig.contentFlags);
+  const hissDepotUnlocked = isHissDepotUnlocked(economy, gameConfig.contentFlags);
   const showCurrency = economy.sellUnlocked || economy.money > 0 || economy.totalSnakesSold > 0;
-  const showJeanPoolIntro =
-    phase === 'playing' &&
-    !needsStarterConfirm &&
-    jeanPoolUnlocked &&
-    !economy.jeanPoolIntroSeen &&
-    !pendingSale;
 
-  const handleDismissJeanPoolIntro = useCallback(() => {
-    audioEngine.playSoftClick();
-    setEconomy((prev) => ({ ...prev, jeanPoolIntroSeen: true }));
-  }, []);
+  // First-sale spotlight runs on first safe third-of-a-kind hatchling regardless of any other feature flag
+  const showSellTutorial = economy.totalSnakesSold === 0;
 
-  const handleVisitJeanPoolFromIntro = useCallback(() => {
-    audioEngine.playSoftClick();
-    setEconomy((prev) => ({ ...prev, jeanPoolIntroSeen: true }));
+  // Enqueue Jean Pool intro after first sale (ONLY if Jean Pool is enabled AND has missing genes to offer)
+  useEffect(() => {
+    if (phase !== 'playing' || needsStarterConfirm || !jeanPoolEnabled) return;
+    if (!jeanPoolUnlocked || economy.jeanPoolIntroSeen) return;
+
+    const missing = getMissingLoci(snakes, gameConfig.contentFlags);
+    if (missing.length === 0) {
+      // Player somehow already owns every possible gene before first sale — skip empty Jean Pool flow
+      setEconomy((prev) => (prev.jeanPoolIntroSeen ? prev : { ...prev, jeanPoolIntroSeen: true }));
+      return;
+    }
+    setUiEventState((prev) => enqueueUiEvent(prev, 'jean_pool_intro'));
+  }, [
+    phase,
+    needsStarterConfirm,
+    jeanPoolEnabled,
+    jeanPoolUnlocked,
+    economy.jeanPoolIntroSeen,
+    snakes,
+    gameConfig.contentFlags,
+  ]);
+
+  // Enqueue Hiss Depot intro after 3rd sale (counts clutch & collection sales; waits for current UI to close)
+  useEffect(() => {
+    if (phase !== 'playing' || needsStarterConfirm || !hissDepotEnabled) return;
+    if (economy.totalSnakesSold < 3 || economy.hissDepotIntroSeen) return;
+    setUiEventState((prev) => enqueueUiEvent(prev, 'hiss_depot_intro'));
+  }, [
+    phase,
+    needsStarterConfirm,
+    hissDepotEnabled,
+    economy.totalSnakesSold,
+    economy.hissDepotIntroSeen,
+  ]);
+
+  // Advance UI event queue strictly one event at a time once all blocking UI menus have closed
+  const isUiBusy =
+    phase !== 'playing' ||
+    needsStarterConfirm ||
+    Boolean(activeClutch) ||
+    Boolean(pendingSale) ||
+    Boolean(slotModalMode) ||
+    Boolean(activeDrawer);
+
+  useEffect(() => {
+    if (isUiBusy || uiEventState.active !== null || uiEventState.queue.length === 0) return;
+    setUiEventState((prev) => advanceUiEventQueue(prev, false));
+  }, [isUiBusy, uiEventState.active, uiEventState.queue.length]);
+
+  // When a queued intro event activates, automatically open its shop UI behind the intro modal & highlight dock button
+  useEffect(() => {
+    const kind = uiEventState.active?.kind;
+    if (!kind) return;
     setSelectedSnakeId(null);
-    setActiveDrawer('jeanpool');
+    if (kind === 'jean_pool_intro') {
+      setActiveDrawer('jeanpool');
+      setDockHighlightTab('jeanpool');
+    } else if (kind === 'hiss_depot_intro') {
+      setActiveDrawer('hissdepot');
+      setDockHighlightTab('hissdepot');
+    }
+  }, [uiEventState.active]);
+
+  const handleAcknowledgeJeanPoolIntro = useCallback(() => {
+    audioEngine.playSoftClick();
+    setEconomy((prev) => ({ ...prev, jeanPoolIntroSeen: true }));
+    setUiEventState((prev) => completeActiveUiEvent(prev));
   }, []);
 
-  // Compute pending sale valuation & warnings cleanly
+  const handleAcknowledgeHissDepotIntro = useCallback(() => {
+    audioEngine.playSoftClick();
+    setEconomy((prev) => ({ ...prev, hissDepotIntroSeen: true }));
+    setUiEventState((prev) => completeActiveUiEvent(prev));
+  }, []);
+
   const pendingSaleMeta = useMemo(() => {
-    if (!pendingSale) return null;
+    if (!pendingSale || !sire || !dam) return null;
     if (pendingSale.kind === 'collection') {
       return {
         snake: pendingSale.snake,
@@ -900,17 +1362,21 @@ export default function App() {
         true
       ),
     };
-  }, [pendingSale, soldMorphKeysSet, snakes, activeClutch, sire.id, dam.id]);
+  }, [pendingSale, soldMorphKeysSet, snakes, activeClutch, sire, dam]);
+
+  const canvasSnakes = phase === 'title' ? titleSnakes : snakes;
 
   return (
     <main className="relative w-full h-full overflow-hidden">
       {/* Full-bleed live procedural Terrarium Canvas */}
       <TerrariumCanvas
-        snakes={snakes}
-        selectedSnakeId={selectedSnakeId}
+        snakes={canvasSnakes}
+        selectedSnakeId={phase === 'title' ? null : selectedSnakeId}
         phase={phase}
-        heatLampOn={settings.heatLampOn}
-        isOccluded={Boolean(activeClutch || activeDrawer || needsStarterConfirm || pendingSale)}
+        heatLampOn={phase === 'title' ? true : settings.heatLampOn}
+        isOccluded={Boolean(
+          activeClutch || activeDrawer || needsStarterConfirm || pendingSale || slotModalMode
+        )}
         mistTriggerCount={mistTriggerCount}
         onSelectSnake={handleSelectSnake}
         onTapSubstrate={() => audioEngine.playSoftClick()}
@@ -919,14 +1385,24 @@ export default function App() {
       {/* Title Screen Overlay */}
       {phase === 'title' && (
         <TitleOverlay
-          onStart={handleStart}
-          discoveredCount={discoveredCount}
-          snakeCount={snakes.length}
+          hasSaves={hasSaves}
+          continueSlot={continueSlot}
+          onContinue={handleContinueFromTitle}
+          onNewGame={() => {
+            audioEngine.playSoftClick();
+            refreshSaveSlots();
+            setSlotModalMode('new');
+          }}
+          onLoadGame={() => {
+            audioEngine.playSoftClick();
+            refreshSaveSlots();
+            setSlotModalMode('load');
+          }}
         />
       )}
 
       {/* First-Time 2-Starter Random Pair Onboarding Modal */}
-      {phase === 'playing' && needsStarterConfirm && (
+      {phase === 'playing' && needsStarterConfirm && snakes.length >= 2 && (
         <StarterPairModal
           pair={snakes.slice(0, 2)}
           onConfirm={handleConfirmStarters}
@@ -935,7 +1411,7 @@ export default function App() {
       )}
 
       {/* Playing HUD */}
-      {phase !== 'title' && !needsStarterConfirm && (
+      {phase !== 'title' && !needsStarterConfirm && sire && dam && (
         <>
           <TopIncubatorHud
             sire={sire}
@@ -952,7 +1428,10 @@ export default function App() {
             onWarmIncubator={handleWarmIncubator}
             onOpenBreeding={() => setActiveDrawer('breeding')}
             onToggleMute={handleToggleMute}
-            onPause={() => setPhase('paused')}
+            onPause={() => {
+              refreshSaveSlots();
+              setPhase('paused');
+            }}
           />
 
           {selectedSnake && !activeDrawer && !activeClutch && (
@@ -978,9 +1457,13 @@ export default function App() {
             hissDepotUnlocked={hissDepotUnlocked}
             jeanPoolCooldownSec={economy.jeanPool.cooldownRemainingSec}
             activeTab={activeDrawer}
+            highlightTab={dockHighlightTab}
             onOpenDrawer={(tab) => {
               audioEngine.playSoftClick();
               setSelectedSnakeId(null);
+              if (dockHighlightTab === tab) {
+                setDockHighlightTab(null);
+              }
               setActiveDrawer((curr) => (curr === tab ? null : tab));
             }}
             onMist={handleMist}
@@ -990,7 +1473,7 @@ export default function App() {
       )}
 
       {/* Field Guide & Shops Drawer */}
-      {phase === 'playing' && !needsStarterConfirm && activeDrawer && !activeClutch && (
+      {phase === 'playing' && !needsStarterConfirm && activeDrawer && !activeClutch && sire && dam && (
         <GalleryDrawer
           activeTab={activeDrawer}
           snakes={snakes}
@@ -1000,6 +1483,7 @@ export default function App() {
           maxDisplay={maxDisplay}
           clutchesHatched={clutchesHatched}
           economy={economy}
+          contentFlags={gameConfig.contentFlags}
           onChangeTab={(tab) => {
             audioEngine.playSoftClick();
             setActiveDrawer(tab);
@@ -1021,7 +1505,7 @@ export default function App() {
       )}
 
       {/* Clutch Hatch Reveal Modal */}
-      {phase === 'playing' && !needsStarterConfirm && activeClutch && (
+      {phase === 'playing' && !needsStarterConfirm && activeClutch && sire && dam && (
         <HatchRevealModal
           eggs={activeClutch}
           sire={sire}
@@ -1029,16 +1513,19 @@ export default function App() {
           allSnakes={snakes}
           discoveredKeys={discoveredKeys}
           soldMorphKeys={soldMorphKeysSet}
-          biasWeights={economy.hissDepot.biasWeights}
+          biasWeights={effectiveHissDepot.biasWeights}
           displayedCount={displayedCount}
           maxDisplay={maxDisplay}
           sellUnlocked={economy.sellUnlocked}
-          showSellTutorial={economy.sellUnlocked && economy.totalSnakesSold === 0}
+          showSellTutorial={showSellTutorial}
           onRevealEgg={handleRevealEgg}
           onRevealAll={handleRevealAllEggs}
           onRenameEggSnake={handleRenameEggSnake}
           onToggleEggDisplay={handleToggleEggDisplay}
           onRequestSellEgg={(egg) => setPendingSale({ kind: 'hatchling', egg })}
+          onSpiderPairingBlocked={(attemptedA, attemptedB, replacementName) =>
+            setSpiderBlockedNotice({ attemptedA, attemptedB, replacementName })
+          }
           onCompleteClutch={handleCompleteClutch}
         />
       )}
@@ -1054,29 +1541,66 @@ export default function App() {
         />
       )}
 
-      {/* First-Sale Jean Pool Unlock Dialogue */}
-      {showJeanPoolIntro && (
+      {/* Queued Shop Intro Dialogues (shown on top of their opened shop UI, one at a time) */}
+      {uiEventState.active?.kind === 'jean_pool_intro' && (
         <JeanPoolIntroModal
           money={economy.money}
-          inActiveClutch={Boolean(activeClutch)}
-          onDismiss={handleDismissJeanPoolIntro}
-          onVisitJeanPool={handleVisitJeanPoolFromIntro}
+          onAcknowledge={handleAcknowledgeJeanPoolIntro}
+        />
+      )}
+      {uiEventState.active?.kind === 'hiss_depot_intro' && (
+        <HissDepotIntroModal
+          money={economy.money}
+          onAcknowledge={handleAcknowledgeHissDepotIntro}
+        />
+      )}
+
+      {/* Super Spider Ethical Breeding Guard Modal */}
+      {spiderBlockedNotice && (
+        <SpiderLethalModal
+          attemptedA={spiderBlockedNotice.attemptedA}
+          attemptedB={spiderBlockedNotice.attemptedB}
+          replacementName={spiderBlockedNotice.replacementName}
+          onClose={() => setSpiderBlockedNotice(null)}
         />
       )}
 
       {/* Pause Modal */}
       {phase === 'paused' && (
         <PauseModal
+          activeSlotId={activeSlotId}
+          gameConfig={gameConfig}
+          hasSaves={hasSaves}
           snakeCount={snakes.length}
           discoveredCount={discoveredCount}
           clutchesHatched={clutchesHatched}
           onResume={() => setPhase('playing')}
-          onReturnTitle={() => {
-            setActiveDrawer(null);
-            setSelectedSnakeId(null);
-            setPhase('title');
+          onOpenSaveModal={() => {
+            audioEngine.playSoftClick();
+            refreshSaveSlots();
+            setSlotModalMode('save');
           }}
+          onOpenLoadModal={() => {
+            audioEngine.playSoftClick();
+            refreshSaveSlots();
+            setSlotModalMode('load');
+          }}
+          onReturnTitle={handleReturnToTitle}
           onResetTerrarium={handleResetTerrarium}
+        />
+      )}
+
+      {/* 3-Slot Save / Load / New Game Picker Modal */}
+      {slotModalMode && (
+        <SaveSlotModal
+          mode={slotModalMode}
+          slots={saveSlots}
+          activeSlotId={activeSlotId}
+          onClose={() => setSlotModalMode(null)}
+          onStartNewGame={handleStartNewGame}
+          onLoadSlot={handleLoadSlot}
+          onSaveToSlot={handleSaveToSlot}
+          onDeleteSlot={handleDeleteSlot}
         />
       )}
     </main>

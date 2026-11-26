@@ -2,13 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   breedClutch,
+  carriesSpider,
   computeBreedingPreview,
+  countAlleles,
   createSimulatedSnake,
   createStarterSnakes,
   derivePatternRule,
   evaluatePhenotype,
   isBlueEyedLeucistic,
+  isLethalSpiderPairing,
   makeGenotype,
+  pickSafeMateFor,
 } from './genetics';
 
 test('Spider gene produces upside-down Dinnerbone posture and lineage vigor penalty', () => {
@@ -247,5 +251,25 @@ test('breedClutch produces deterministic clutch with parent lineage and valid od
     assert.equal(egg.snake.sire?.id, starters[0].id);
     assert.equal(egg.snake.dam?.id, starters[1].id);
     assert.equal(egg.snake.generation, 2);
+  }
+});
+
+test('Super Spider ethical guard flags Spider x Spider pairings, picks safe non-Spider mate, and never hatches homozygous Spider', () => {
+  const spiderA = createSimulatedSnake(makeGenotype({ spider: [1, 0] }), 0.2, new Set(), 'Spidey A');
+  const spiderB = createSimulatedSnake(makeGenotype({ spider: [1, 0] }), 0.6, new Set(['Spidey A']), 'Spidey B');
+  const safePastel = createSimulatedSnake(makeGenotype({ pastel: [1, 0] }), 0.4, new Set(['Spidey A', 'Spidey B']), 'Sunny');
+
+  assert.equal(carriesSpider(spiderA), true);
+  assert.equal(carriesSpider(safePastel), false);
+  assert.equal(isLethalSpiderPairing(spiderA, spiderB), true);
+  assert.equal(isLethalSpiderPairing(spiderA, safePastel), false);
+
+  const safeMate = pickSafeMateFor(spiderA, [spiderA, spiderB, safePastel]);
+  assert.equal(safeMate?.id, safePastel.id);
+
+  // Even if forced, breedClutch must never produce homozygous [1, 1] Super Spider
+  const eggs = breedClutch(spiderA, spiderB, new Set(), new Set(), 12, () => 0.0001);
+  for (const egg of eggs) {
+    assert.ok(countAlleles(egg.snake.genotype.spider) <= 1, 'Never hatch homozygous Super Spider');
   }
 });
