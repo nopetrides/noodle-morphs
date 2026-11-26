@@ -2,6 +2,12 @@ import { useMemo, useState } from 'react';
 import { ArrowUpDown, Check, DollarSign, Eye, EyeOff, Pencil, Sparkles, X } from 'lucide-react';
 import { ContentFlag, hasContentFlag } from '../game/contentFlags';
 import {
+  ELEMENTAL_SYNTHESIS_RECIPES,
+  formatSynthesisRecipeLabel,
+  getElementalTier,
+  isSynthesisOnlyLocus,
+} from '../game/elementalSynthesis';
+import {
   analyzeSaleWarnings,
   canSnakeBreed,
   evaluateSnakeSaleValue,
@@ -17,6 +23,7 @@ import {
 } from '../game/economy';
 import {
   computeBreedingPreview,
+  countAlleles,
   formatMutationOddsText,
   getEnabledLoci,
   LOCUS_DEFINITIONS,
@@ -176,12 +183,12 @@ export function GalleryDrawer({
     [snakes, parentSort, sire, discoveredKeys]
   );
   const sireUndiscoveredMap = useMemo(
-    () => buildUndiscoveredChildrenMap(snakes, dam, discoveredKeys),
-    [snakes, dam, discoveredKeys]
+    () => buildUndiscoveredChildrenMap(snakes, dam, discoveredKeys, contentFlags),
+    [snakes, dam, discoveredKeys, contentFlags]
   );
   const damUndiscoveredMap = useMemo(
-    () => buildUndiscoveredChildrenMap(snakes, sire, discoveredKeys),
-    [snakes, sire, discoveredKeys]
+    () => buildUndiscoveredChildrenMap(snakes, sire, discoveredKeys, contentFlags),
+    [snakes, sire, discoveredKeys, contentFlags]
   );
 
   const breedingPreview = useMemo(
@@ -190,10 +197,24 @@ export function GalleryDrawer({
         sire,
         dam,
         discoveredKeys,
-        hissDepotEnabled ? effectiveHissDepot.biasWeights : undefined
+        hissDepotEnabled ? effectiveHissDepot.biasWeights : undefined,
+        contentFlags
       ),
-    [sire, dam, discoveredKeys, hissDepotEnabled, effectiveHissDepot.biasWeights]
+    [sire, dam, discoveredKeys, hissDepotEnabled, effectiveHissDepot.biasWeights, contentFlags]
   );
+
+  const customMorphsEnabled = hasContentFlag(contentFlags, ContentFlag.CustomMorphs);
+  const discoveredSynthesisRecipes = useMemo(() => {
+    if (!customMorphsEnabled) return [];
+    return ELEMENTAL_SYNTHESIS_RECIPES.filter((recipe) => {
+      const def = LOCUS_DEFINITIONS[recipe.result];
+      const normKey = def.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      return (
+        discoveredKeys.has(normKey) ||
+        snakes.some((s) => countAlleles(s.genotype[recipe.result]) > 0)
+      );
+    }).sort((a, b) => a.tier - b.tier);
+  }, [customMorphsEnabled, discoveredKeys, snakes]);
 
   const undiscoveredBreedingCount = useMemo(
     () => breedingPreview.filter((e) => !e.isDiscovered).length,
@@ -785,10 +806,10 @@ export function GalleryDrawer({
                 <div className="divide-y divide-[#D8BC87]/12">
                   {visibleBreedingPreview.map((entry) => (
                     <div
-                      key={entry.morphKey}
+                      key={`${entry.outcomeKind ?? 'mix'}:${entry.synthesisResultLocus ?? ''}:${entry.morphKey}`}
                       className="py-2.5 flex items-center justify-between gap-4 text-sm"
                     >
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex items-center flex-wrap gap-x-2 gap-y-0.5">
                         <span
                           className={
                             entry.isDiscovered
@@ -798,13 +819,21 @@ export function GalleryDrawer({
                         >
                           {entry.isDiscovered ? entry.morphName : '???'}
                         </span>
+                        {entry.outcomeKind === 'synthesis' && (
+                          <span
+                            data-testid="breeding-synthesis-badge"
+                            className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#1E3B42] text-[#8CEAF2] border border-[#56C6D4]/45"
+                          >
+                            ✦ Synthesis{entry.synthesisTier ? ` T${entry.synthesisTier}` : ''}
+                          </span>
+                        )}
                         {!entry.isDiscovered && (
-                          <span className="ml-2 text-xs font-medium text-[#C8A662]">
+                          <span className="text-xs font-medium text-[#C8A662]">
                             Undiscovered
                           </span>
                         )}
                         {entry.isDiscovered && entry.includesUpsideDown && (
-                          <span className="ml-2 text-xs text-[#E5A280]">
+                          <span className="text-xs text-[#E5A280]">
                             · Upside-down Spider trait
                           </span>
                         )}
@@ -873,17 +902,25 @@ export function GalleryDrawer({
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-2 text-xs">
                   {enabledLoci.filter((id) => {
                     const def = LOCUS_DEFINITIONS[id];
+                    if (isSynthesisOnlyLocus(id)) {
+                      const normKey = def.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+                      const known =
+                        discoveredKeys.has(normKey) ||
+                        snakes.some((s) => countAlleles(s.genotype[id]) > 0);
+                      if (!known) return false;
+                    }
                     if (refModeFilter === 'all') return true;
                     if (refModeFilter === 'custom') return Boolean(def.isCustom);
                     return def.mode === refModeFilter;
                   }).map((id) => {
                     const def = LOCUS_DEFINITIONS[id];
+                    const synthTier = getElementalTier(id);
                     return (
                       <div key={id} className="text-[#B8AA96]">
                         <span className="font-semibold text-[#EFE5D6]">{def.name}</span>{' '}
                         {def.isCustom && (
                           <span className="inline-block text-[10px] font-semibold px-1.5 py-0.2 rounded bg-[#3B2B4B] text-[#DEC2FF] border border-[#9B6EDB]/35 mr-1">
-                            Custom
+                            {synthTier !== null && synthTier > 0 ? `✦ T${synthTier}` : 'Custom'}
                           </span>
                         )}
                         <span className="text-[#9E8F7B]">({def.mode})</span> — {def.visualEffect}
@@ -958,6 +995,34 @@ export function GalleryDrawer({
                   </button>
                 ))}
               </div>
+
+              {/* Discovered Synthesis Recipes (strictly shown only when CustomMorphs is enabled and >=1 synthesized gene is known) */}
+              {customMorphsEnabled && discoveredSynthesisRecipes.length > 0 && (
+                <div
+                  data-testid="morphdex-synthesis-log"
+                  className="rounded-xl bg-[#1D282C] border border-[#56C6D4]/30 p-4 space-y-2"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-[#8CEAF2]">
+                      ✦ Discovered Synthesis Recipes ({discoveredSynthesisRecipes.length}/
+                      {ELEMENTAL_SYNTHESIS_RECIPES.length})
+                    </h4>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
+                    {discoveredSynthesisRecipes.map((recipe) => (
+                      <div
+                        key={recipe.id}
+                        className="rounded-lg bg-[#161F23] border border-[#56C6D4]/20 px-2.5 py-1.5 text-[#D8ECEF]"
+                      >
+                        <div className="font-mono-code text-[11px] text-[#8CEAF2]">
+                          T{recipe.tier} · {formatSynthesisRecipeLabel(recipe, LOCUS_DEFINITIONS)}
+                        </div>
+                        <div className="text-[11px] text-[#9EB7BC] mt-0.5">{recipe.rationale}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {discoveredList.map((disc) => (

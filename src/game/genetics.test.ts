@@ -200,14 +200,15 @@ test('Custom elemental Lava + Water breeds into Cobblestone (and homozygous into
   assert.equal(obsidianPheno.patternRule.motif, 'cobblestone');
   assert.equal(obsidianPheno.rarity, 'legendary');
 
-  // Simulator helper creates playable Super Water & Super Lava snakes that guarantee 100% Cobblestone!
+  // Simulator helper creates playable Super Water & Super Lava snakes that guarantee 100% Obsidian synthesis!
   const superWater = createSimulatedSnake(makeGenotype({ tidal: [1, 1] }), 0.42, new Set());
   const superLava = createSimulatedSnake(makeGenotype({ magma: [1, 1] }), 0.42, new Set([superWater.name]));
   assert.equal(superWater.phenotype.morphName, 'Super Water');
   assert.equal(superLava.phenotype.morphName, 'Super Lava');
   const guaranteedPreview = computeBreedingPreview(superWater, superLava);
   assert.equal(guaranteedPreview.length, 1);
-  assert.equal(guaranteedPreview[0].morphName, 'Cobblestone');
+  assert.equal(guaranteedPreview[0].morphName, 'Obsidian');
+  assert.equal(guaranteedPreview[0].outcomeKind, 'synthesis');
   assert.ok(Math.abs(guaranteedPreview[0].probability - 1) < 1e-6);
 });
 

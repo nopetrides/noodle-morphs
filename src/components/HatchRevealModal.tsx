@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { ArrowUpDown, CheckCircle2, DollarSign, Eye, Sparkles } from 'lucide-react';
+import { DEFAULT_CONTENT_FLAGS } from '../game/contentFlags';
 import {
   analyzeSaleWarnings,
   canSnakeBreed,
@@ -35,6 +36,7 @@ interface HatchRevealModalProps {
   allSnakes: SnakeEntity[];
   discoveredKeys: Set<string>;
   soldMorphKeys: Set<string>;
+  contentFlags?: number;
   biasWeights: GeneBiasDistribution;
   displayedCount: number;
   maxDisplay: number;
@@ -83,6 +85,7 @@ export function HatchRevealModal({
   allSnakes,
   discoveredKeys,
   soldMorphKeys,
+  contentFlags = DEFAULT_CONTENT_FLAGS,
   biasWeights,
   displayedCount,
   maxDisplay,
@@ -133,12 +136,12 @@ export function HatchRevealModal({
     [selectableParents, parentSort, selectedNextSire, effectiveDiscoveredKeys]
   );
   const sireUndiscoveredMap = useMemo(
-    () => buildUndiscoveredChildrenMap(selectableParents, selectedNextDam, effectiveDiscoveredKeys),
-    [selectableParents, selectedNextDam, effectiveDiscoveredKeys]
+    () => buildUndiscoveredChildrenMap(selectableParents, selectedNextDam, effectiveDiscoveredKeys, contentFlags),
+    [selectableParents, selectedNextDam, effectiveDiscoveredKeys, contentFlags]
   );
   const damUndiscoveredMap = useMemo(
-    () => buildUndiscoveredChildrenMap(selectableParents, selectedNextSire, effectiveDiscoveredKeys),
-    [selectableParents, selectedNextSire, effectiveDiscoveredKeys]
+    () => buildUndiscoveredChildrenMap(selectableParents, selectedNextSire, effectiveDiscoveredKeys, contentFlags),
+    [selectableParents, selectedNextSire, effectiveDiscoveredKeys, contentFlags]
   );
 
   const fullNextPairPreview = useMemo(() => {
@@ -147,9 +150,10 @@ export function HatchRevealModal({
       selectedNextSire,
       selectedNextDam,
       effectiveDiscoveredKeys,
-      biasWeights
+      biasWeights,
+      contentFlags
     );
-  }, [allRevealed, selectedNextSire, selectedNextDam, effectiveDiscoveredKeys, biasWeights]);
+  }, [allRevealed, selectedNextSire, selectedNextDam, effectiveDiscoveredKeys, biasWeights, contentFlags]);
 
   const undiscoveredCount = useMemo(
     () => fullNextPairPreview.filter((e) => !e.isDiscovered).length,
@@ -339,7 +343,7 @@ export function HatchRevealModal({
                   </div>
 
                   <div className="mb-2.5 flex justify-center">
-                    <MiniSnakeCanvas phenotype={phenotype} width={238} height={90} animate={!egg.sold} />
+                    <MiniSnakeCanvas phenotype={phenotype} width={238} height={90} animate={!egg.sold} lazy={false} />
                   </div>
 
                   <div className="flex items-center gap-1.5 flex-wrap">
@@ -366,6 +370,13 @@ export function HatchRevealModal({
 
                     {phenotype.hetGenes.length > 0 && (
                       <div>Carries Het {phenotype.hetGenes.join(', ')}</div>
+                    )}
+
+                    {egg.wasSynthesis && egg.synthesisLocusName && (
+                      <div className="text-[#8CEAF2] font-medium">
+                        ✦ Synthesized {egg.synthesisLocusName}
+                        {egg.synthesisTier ? ` (Tier ${egg.synthesisTier})` : ''}
+                      </div>
                     )}
 
                     {egg.wasMutation && egg.mutationLocusName && (
@@ -624,7 +635,15 @@ export function HatchRevealModal({
                   <div className="text-xs text-[#B9AA95] flex flex-wrap items-center gap-x-3 gap-y-1">
                     <span className="text-[#9E8F7B]">Expected odds:</span>
                     {nextPairPreview.map((entry) => (
-                      <span key={entry.morphKey} className="tabular-nums">
+                      <span
+                        key={`${entry.outcomeKind ?? 'mix'}:${entry.synthesisResultLocus ?? ''}:${entry.morphKey}`}
+                        className="tabular-nums"
+                      >
+                        {entry.outcomeKind === 'synthesis' && (
+                          <span className="text-[#8CEAF2] mr-1" title="Elemental Synthesis">
+                            ✦
+                          </span>
+                        )}
                         <span
                           className={
                             entry.isDiscovered
@@ -702,6 +721,7 @@ export function HatchRevealModal({
                 width={220}
                 height={82}
                 animate
+                lazy={false}
               />
             </div>
 

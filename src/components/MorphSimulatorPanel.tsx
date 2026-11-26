@@ -26,11 +26,12 @@ import {
   createWildTypeGenotype,
   evaluatePhenotype,
   getEnabledLoci,
+  LOCI_ORDER,
   LOCUS_DEFINITIONS,
   resolveSkinSpecForPhenotype,
 } from '../game/genetics';
 import { globalSkinCache } from '../game/skinCache';
-import { renderMorphSpriteSheet } from '../game/spriteSheet';
+import { renderMorphSpriteSheetProgressive } from '../game/spriteSheet';
 import type {
   AllelePair,
   FieldOperation,
@@ -188,12 +189,18 @@ export function MorphSimulatorPanel({
   const [opStrengthOverride, setOpStrengthOverride] = useState<number | null>(null);
   const [copiedJson, setCopiedJson] = useState<boolean>(false);
 
-  // 61-Snake Sprite Sheet Exporter state
+  // Reference Sprite Sheet Exporter state (progressive non-blocking live canvas)
+  const totalSheetSnakes = 1 + LOCI_ORDER.length * 2;
   const [sheetModalOpen, setSheetModalOpen] = useState<boolean>(false);
   const [sheetStage, setSheetStage] = useState<SkinDebugStage>('final');
   const [sheetIncludeUv, setSheetIncludeUv] = useState<boolean>(true);
-  const [sheetDataUrl, setSheetDataUrl] = useState<string | null>(null);
   const [sheetDims, setSheetDims] = useState<{ width: number; height: number } | null>(null);
+  const [sheetProgress, setSheetProgress] = useState<{ done: number; total: number }>({
+    done: 0,
+    total: totalSheetSnakes,
+  });
+  const [sheetExporting, setSheetExporting] = useState<boolean>(false);
+  const sheetCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Loci currently present (visual or het) anywhere in the player's collection
   const ownedLoci = useMemo(() => {
@@ -362,41 +369,77 @@ export function MorphSimulatorPanel({
     setCustomName('');
   };
 
-  const generateSpriteSheet = (stage: SkinDebugStage, includeUv: boolean) => {
-    const offscreen = document.createElement('canvas');
-    const { layout } = renderMorphSpriteSheet(offscreen, {
-      seed: polygenicSeed,
-      debugStage: stage,
-      includeUnwrappedStrip: includeUv,
-    });
-    setSheetDims({ width: layout.width, height: layout.height });
-    setSheetDataUrl(offscreen.toDataURL('image/png'));
-  };
+  // Drive progressive off-thread sprite sheet rendering whenever the modal opens or options change
+  useEffect(() => {
+    if (!sheetModalOpen) return;
+    const canvas = sheetCanvasRef.current;
+    if (!canvas) return;
+
+    const handle = renderMorphSpriteSheetProgressive(
+      canvas,
+      {
+        seed: polygenicSeed,
+        debugStage: sheetStage,
+        includeUnwrappedStrip: sheetIncludeUv,
+      },
+      {
+        onProgress: (done, total) => {
+          setSheetProgress({ done, total });
+        },
+        onComplete: (total) => {
+          setSheetProgress({ done: total, total });
+        },
+      }
+    );
+    setSheetDims({ width: handle.layout.width, height: handle.layout.height });
+
+    return () => {
+      handle.cancel();
+    };
+  }, [sheetModalOpen, sheetStage, sheetIncludeUv, polygenicSeed]);
 
   const handleOpenSpriteSheet = () => {
     setSheetStage(debugStage);
+    setSheetProgress({ done: 0, total: totalSheetSnakes });
     setSheetModalOpen(true);
-    generateSpriteSheet(debugStage, sheetIncludeUv);
   };
 
   const handleChangeSheetStage = (nextStage: SkinDebugStage) => {
     setSheetStage(nextStage);
-    generateSpriteSheet(nextStage, sheetIncludeUv);
   };
 
   const handleToggleSheetUv = (nextIncludeUv: boolean) => {
     setSheetIncludeUv(nextIncludeUv);
-    generateSpriteSheet(sheetStage, nextIncludeUv);
   };
 
   const handleDownloadSpriteSheet = () => {
-    if (!sheetDataUrl) return;
-    const link = document.createElement('a');
-    link.href = sheetDataUrl;
-    link.download = `morpharium-61-morphs-seed-${polygenicSeed.toFixed(3)}-${sheetStage}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const canvas = sheetCanvasRef.current;
+    if (!canvas || sheetExporting) return;
+    setSheetExporting(true);
+    const filename = `morpharium-${totalSheetSnakes}-morphs-seed-${polygenicSeed.toFixed(3)}-${sheetStage}.png`;
+
+    if (typeof canvas.toBlob === 'function') {
+      canvas.toBlob((blob) => {
+        setSheetExporting(false);
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }, 'image/png');
+    } else {
+      const link = document.createElement('a');
+      link.href = canvas.toDataURL('image/png');
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setSheetExporting(false);
+    }
   };
 
   const primaryContribution = activeSkinSpec.contributions[0];
@@ -778,7 +821,7 @@ export function MorphSimulatorPanel({
               className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-[#2E2538] hover:bg-[#3B3049] border border-[#9B6EDB]/45 text-[#E8D7FF] cursor-pointer transition-colors"
             >
               <Grid2x2 className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>[Dev] 61-Snake Sprite Sheet</span>
+              <span>[Dev] {totalSheetSnakes}-Snake Sprite Sheet</span>
             </button>
             {spawnNotice && (
               <div
@@ -1041,12 +1084,12 @@ export function MorphSimulatorPanel({
         </div>
       )}
 
-      {/* 61-Snake Sprite Sheet Preview & PNG Export Modal */}
+      {/* Progressive Morph Reference Sprite Sheet Preview & PNG Export Modal */}
       {sheetModalOpen && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="61-Snake Morph Sprite Sheet Export"
+          aria-label={`${totalSheetSnakes}-Snake Morph Sprite Sheet Export`}
           data-testid="sprite-sheet-modal"
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0D0A08]/88"
         >
@@ -1055,10 +1098,15 @@ export function MorphSimulatorPanel({
               <div>
                 <h3 className="font-display text-base font-semibold text-[#F7F1E5] flex items-center gap-2">
                   <Grid2x2 className="w-4 h-4 text-[#D9A754]" aria-hidden="true" />
-                  <span>61-Snake Morph Sprite Sheet</span>
+                  <span>{totalSheetSnakes}-Snake Morph Sprite Sheet</span>
+                  {sheetProgress.done < sheetProgress.total && (
+                    <span className="text-[10px] font-mono-code font-medium px-2 py-0.5 rounded bg-[#3A2E1A] text-[#F1CD82] border border-[#D9A754]/40 tabular-nums">
+                      Rendering {sheetProgress.done}/{sheetProgress.total}…
+                    </span>
+                  )}
                 </h3>
                 <p className="text-[11px] text-[#B3A490]">
-                  1 Base + 30 Loci at 1× &amp; 2× · Seed {polygenicSeed.toFixed(3)}
+                  1 Base + {LOCI_ORDER.length} Loci at 1× &amp; 2× · Seed {polygenicSeed.toFixed(3)}
                   {sheetDims ? ` · ${sheetDims.width}×${sheetDims.height}px PNG` : ''}
                 </p>
               </div>
@@ -1096,11 +1144,11 @@ export function MorphSimulatorPanel({
                   type="button"
                   data-testid="sheet-download-btn"
                   onClick={handleDownloadSpriteSheet}
-                  disabled={!sheetDataUrl}
+                  disabled={sheetProgress.done < sheetProgress.total || sheetExporting}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#D9A754] hover:bg-[#E7B96A] text-[#1C1610] cursor-pointer transition-colors disabled:opacity-40"
                 >
                   <Download className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Download PNG</span>
+                  <span>{sheetExporting ? 'Exporting…' : 'Download PNG'}</span>
                 </button>
 
                 <button
@@ -1114,19 +1162,24 @@ export function MorphSimulatorPanel({
               </div>
             </div>
 
-            <div className="flex-1 overflow-auto p-4 bg-[#120F0C]">
-              {sheetDataUrl ? (
-                <img
-                  src={sheetDataUrl}
-                  alt="61-snake Morpharium reference sprite sheet showing base wild-type plus 30 genes at 1x and 2x"
-                  data-testid="sprite-sheet-preview-img"
-                  className="max-w-full h-auto mx-auto rounded-lg border border-[#D8BC87]/20"
+            {sheetProgress.done < sheetProgress.total && (
+              <div className="h-1 w-full bg-[#16120F] overflow-hidden shrink-0">
+                <div
+                  className="h-full bg-[#D9A754] transition-[width] duration-150"
+                  style={{
+                    width: `${Math.round((sheetProgress.done / Math.max(1, sheetProgress.total)) * 100)}%`,
+                  }}
                 />
-              ) : (
-                <div className="py-20 text-center text-sm text-[#B3A490]">
-                  Rendering 61 snakes...
-                </div>
-              )}
+              </div>
+            )}
+
+            <div className="flex-1 overflow-auto p-4 bg-[#120F0C]">
+              <canvas
+                ref={sheetCanvasRef}
+                aria-label={`${totalSheetSnakes}-snake Morpharium reference sprite sheet showing base wild-type plus ${LOCI_ORDER.length} genes at 1x and 2x`}
+                data-testid="sprite-sheet-preview-canvas"
+                className="max-w-full h-auto mx-auto rounded-lg border border-[#D8BC87]/20 block"
+              />
             </div>
           </div>
         </div>

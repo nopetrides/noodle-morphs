@@ -3,6 +3,7 @@ import {
   DEFAULT_CONTENT_FLAGS,
   hasContentFlag,
 } from './contentFlags';
+import { getElementalTier, isSynthesisOnlyLocus } from './elementalSynthesis';
 import {
   countAlleles,
   evaluatePhenotype,
@@ -282,14 +283,20 @@ export function evaluateSnakeSaleValue(
 
   let recessiveVisuals = 0;
   let superVisuals = 0;
+  let maxSynthTier = 0;
   for (const loc of LOCI_ORDER) {
     const c = countAlleles(genotype[loc]);
     const def = LOCUS_DEFINITIONS[loc];
     if (def.mode === 'recessive' && c === 2) recessiveVisuals += 1;
     if (def.mode === 'codominant' && c === 2) superVisuals += 1;
+    if (c > 0) {
+      const tier = getElementalTier(loc);
+      if (tier !== null && tier > maxSynthTier) maxSynthTier = tier;
+    }
   }
 
-  const comboBonus = recessiveVisuals * 30 + superVisuals * 22;
+  const tierBonus = maxSynthTier > 0 ? maxSynthTier * 20 : 0;
+  const comboBonus = recessiveVisuals * 30 + superVisuals * 22 + tierBonus;
   const vigorFactor = 0.85 + 0.3 * (phenotype.lineageVigor / BASE_GLOBAL_VIGOR);
   const baseValue = Math.max(
     10,
@@ -389,8 +396,10 @@ export function getMissingLoci(
   snakes: SnakeEntity[],
   contentFlags = DEFAULT_CONTENT_FLAGS
 ): LocusId[] {
-  return getEnabledLoci(contentFlags).filter((loc) =>
-    snakes.every((s) => countAlleles(s.genotype[loc]) === 0)
+  return getEnabledLoci(contentFlags).filter(
+    (loc) =>
+      !isSynthesisOnlyLocus(loc) &&
+      snakes.every((s) => countAlleles(s.genotype[loc]) === 0)
   );
 }
 

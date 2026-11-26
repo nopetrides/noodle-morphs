@@ -263,8 +263,28 @@ test('Disabling Jean Pool and Hiss Depot gates unlocks and resets Hiss Depot mod
     BASE_MAX_DISPLAY_SNAKES
   );
 
-  // Title showcase snakes have unique title_ IDs and are onDisplay
-  const showcase = createTitleShowcaseSnakes(5);
-  assert.equal(showcase.length, 5);
+  // Title showcase snakes default to non-custom morphs (first-time users) and respect custom category flags
+  const showcase = createTitleShowcaseSnakes(20);
+  assert.equal(showcase.length, 20);
   assert.ok(showcase.every((s) => s.id.startsWith('title_') && s.onDisplay));
+  assert.ok(
+    showcase.every((s) => !s.phenotype.isCustomMorph),
+    'Default title showcase snakes for first-time users must not include custom morphs'
+  );
+
+  const realOnlyShowcase = createTitleShowcaseSnakes(20, Math.random, ContentFlag.RealMorphs);
+  assert.ok(
+    realOnlyShowcase.every((s) => !s.phenotype.isCustomMorph),
+    'RealMorphs-only title showcase must not include custom morphs'
+  );
+
+  const customEnabledShowcase = createTitleShowcaseSnakes(
+    40,
+    Math.random,
+    ContentFlag.RealMorphs | ContentFlag.CustomMorphs
+  );
+  assert.ok(
+    customEnabledShowcase.some((s) => s.phenotype.isCustomMorph),
+    'Title showcase with CustomMorphs enabled should be able to generate custom morphs'
+  );
 });

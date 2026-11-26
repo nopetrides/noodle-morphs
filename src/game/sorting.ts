@@ -1,3 +1,4 @@
+import { DEFAULT_CONTENT_FLAGS } from './contentFlags';
 import { computeBreedingPreview } from './genetics';
 import type { MorphDiscovery, MorphRarity, SnakeEntity } from './types';
 
@@ -28,10 +29,11 @@ const RARITY_RANK: Record<MorphRarity, number> = {
 export function countUndiscoveredChildren(
   candidate: SnakeEntity,
   partner: SnakeEntity | null | undefined,
-  discoveredKeys: Set<string>
+  discoveredKeys: Set<string>,
+  contentFlags = DEFAULT_CONTENT_FLAGS
 ): number {
   if (!partner || candidate.id === partner.id) return 0;
-  const preview = computeBreedingPreview(candidate, partner, discoveredKeys);
+  const preview = computeBreedingPreview(candidate, partner, discoveredKeys, undefined, contentFlags);
   let count = 0;
   for (const entry of preview) {
     if (!entry.isDiscovered) count += 1;
@@ -45,11 +47,12 @@ export function countUndiscoveredChildren(
 export function buildUndiscoveredChildrenMap(
   snakes: SnakeEntity[],
   partner: SnakeEntity | null | undefined,
-  discoveredKeys: Set<string>
+  discoveredKeys: Set<string>,
+  contentFlags = DEFAULT_CONTENT_FLAGS
 ): Map<string, number> {
   const map = new Map<string, number>();
   for (const snake of snakes) {
-    map.set(snake.id, countUndiscoveredChildren(snake, partner, discoveredKeys));
+    map.set(snake.id, countUndiscoveredChildren(snake, partner, discoveredKeys, contentFlags));
   }
   return map;
 }

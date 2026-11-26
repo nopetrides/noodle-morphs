@@ -1,5 +1,5 @@
 import { resolveSkinSpecForPhenotype } from './genetics';
-import { globalSkinCache } from './skinCache';
+import { type CachedSkinEntry, globalSkinCache } from './skinCache';
 import { computeOutlineGeometry } from './spine';
 import type {
   SkinDebugStage,
@@ -267,6 +267,8 @@ export interface RenderSnakeOptions {
   skinSpecOverride?: SkinPhenotypeSpec;
   /** Optional explicit seed override */
   seedOverride?: number;
+  /** Optional pre-synthesized skin buffer (e.g., from Web Worker) to skip synchronous synthesis */
+  cachedSkinOverride?: CachedSkinEntry;
 }
 
 /**
@@ -294,6 +296,7 @@ export function renderProceduralSnake(
     debugStage = 'final',
     skinSpecOverride,
     seedOverride,
+    cachedSkinOverride,
   } = opts;
 
   const { palette, isUpsideDown } = phenotype;
@@ -304,16 +307,22 @@ export function renderProceduralSnake(
   // Resolution scaling: crisp 256×64 for terrarium / large previews, compact 192×48 for mini cards
   const texW = spine.baseRadius >= 11 ? 256 : 192;
   const texH = spine.baseRadius >= 11 ? 64 : 48;
-  const cachedSkin = globalSkinCache.getOrSynthesize(spec, palette, seed, texW, texH, debugStage);
+  const cachedSkin =
+    cachedSkinOverride ??
+    globalSkinCache.getOrSynthesize(spec, palette, seed, texW, texH, debugStage);
 
   ctx.save();
 
-  // 1. Soft grounded contact shadow
+  const bodyOpacity = debugStage === 'final' ? (palette.bodyOpacity ?? 1) : 1;
+  const isTranslucent = bodyOpacity < 0.99;
+
+  // 1. Soft grounded contact shadow (lighter gossamer shadow for translucent Air / Glass / Diamond snakes)
   if (showShadow) {
     ctx.save();
     ctx.translate(Math.cos(lightAngle) * 5, Math.sin(lightAngle) * 6);
     traceSmoothClosedLoop(ctx, loop);
-    ctx.fillStyle = 'rgba(12, 9, 6, 0.34)';
+    const shadowAlpha = 0.34 * (0.22 + 0.78 * bodyOpacity);
+    ctx.fillStyle = `rgba(12, 9, 6, ${shadowAlpha.toFixed(3)})`;
     ctx.fill();
     ctx.restore();
   }
@@ -336,10 +345,20 @@ export function renderProceduralSnake(
   }
 
   // 4. Base silhouette fill + clipped UV-warped deformable skin ribbon
+  //    For translucent morphs (Air, Glass, Diamond, Frost, Gems), skip opaque base fill so the
+  //    per-pixel alpha UV skin lets the terrarium moss & substrate shine right through!
   ctx.save();
   traceSmoothClosedLoop(ctx, loop);
-  ctx.fillStyle = isUpsideDown && debugStage === 'final' ? palette.belly : palette.base;
-  ctx.fill();
+  if (!isTranslucent) {
+    ctx.fillStyle = isUpsideDown && debugStage === 'final' ? palette.belly : palette.base;
+    ctx.fill();
+  } else {
+    ctx.save();
+    ctx.globalAlpha = bodyOpacity * 0.22;
+    ctx.fillStyle = isUpsideDown ? palette.belly : palette.base;
+    ctx.fill();
+    ctx.restore();
+  }
   ctx.clip();
 
   if (cachedSkin.canvas) {
@@ -348,20 +367,26 @@ export function renderProceduralSnake(
   }
 
   if (isUpsideDown && debugStage === 'final') {
+    ctx.save();
+    if (isTranslucent) ctx.globalAlpha = Math.max(0.45, bodyOpacity);
     renderUpsideDownBelly(ctx, spine, phenotype);
+    ctx.restore();
   }
 
   if (debugStage === 'final') {
-    renderDorsalSheen(ctx, spine, isUpsideDown, palette.isLeucistic);
+    renderDorsalSheen(ctx, spine, isUpsideDown, palette.isLeucistic || isTranslucent);
   }
   ctx.restore();
 
-  // 5. Crisp anatomical outline
+  // 5. Crisp anatomical outline (gossamer rim on Air / Glass so silhouette stays readable yet airy)
+  ctx.save();
+  if (isTranslucent) ctx.globalAlpha = Math.max(0.42, bodyOpacity * 0.85);
   traceSmoothClosedLoop(ctx, loop);
   ctx.strokeStyle = palette.outline;
   ctx.lineWidth = Math.max(1.3, spine.baseRadius * 0.12);
   ctx.lineJoin = 'round';
   ctx.stroke();
+  ctx.restore();
 
   // 6. Head details (eyes, nostrils, crown blush/eyestripes — kept minimal during field debug inspection)
   renderHeadDetails(ctx, spine, phenotype, debugStage);

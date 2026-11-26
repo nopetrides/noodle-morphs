@@ -45,7 +45,49 @@ export type LocusId =
   | 'leopard'
   | 'monarch'
   | 'cinnamon'
-  | 'blade';
+  | 'blade'
+  // Element & Mineral Synthesis Tree (CustomMorphs — appended to preserve compact v2 save indices)
+  // Tier 0 Starters (alongside tidal & magma)
+  | 'earth'
+  | 'air'
+  | 'wood'
+  // Tier 1 Primary Fusions
+  | 'cobblestone'
+  | 'clay'
+  | 'sand'
+  | 'frost'
+  | 'ash'
+  | 'sap'
+  | 'basalt'
+  // Tier 2 Back-Breeding & Refined Materials
+  | 'glass'
+  | 'terracotta'
+  | 'sandstone'
+  | 'amber'
+  | 'coal'
+  | 'quartz'
+  | 'iron'
+  | 'copper'
+  // Tier 3 Supers & Cross-Tier Alloys / Stones
+  | 'obsidian'
+  | 'steel'
+  | 'gold'
+  | 'malachite'
+  | 'granite'
+  | 'marble'
+  | 'petrifiedwood'
+  | 'agate'
+  // Tier 4 Cross-Tier + Supers + Recessive Gems
+  | 'amethyst'
+  | 'ruby'
+  | 'lapis'
+  | 'emerald'
+  | 'opal'
+  // Tier 5 Apex Recessive Mastery
+  | 'diamond'
+  | 'sapphire'
+  | 'bismuth'
+  | 'jade';
 
 export type InheritanceMode = 'dominant' | 'codominant' | 'recessive';
 
@@ -106,11 +148,15 @@ export type PatternMotif =
   | 'teardrops'
   | 'bars'
   | 'tracks'
-  // Custom Elemental Fusion & Showcase motifs (Lava + Water -> Cobblestone, Milk Band tricolor)
+  // Custom Elemental Fusion & Showcase motifs
   | 'magma_cracks'
   | 'ripples'
   | 'cobblestone'
-  | 'milk_bands';
+  | 'milk_bands'
+  | 'veins'
+  | 'facets'
+  | 'strata'
+  | 'bismuth';
 
 export type PatternWeight = 'thin' | 'medium' | 'broad' | 'blushed';
 
@@ -165,6 +211,8 @@ export interface SnakePalette {
   mottleColorA?: string;
   mottleColorB?: string;
   mottleStrength?: number;
+  /** Optional body opacity in (0, 1] for translucent elements/crystals (Air, Glass, Frost, Diamond, Gems) */
+  bodyOpacity?: number;
 }
 
 export type FieldOperation =
@@ -188,6 +236,12 @@ export type SkinFieldPrimitiveId =
   | 'water_caustics'
   | 'shattered_mosaic'
   | 'stripe_tracks'
+  | 'mineral_veins'
+  | 'crystal_facets'
+  | 'banded_agate'
+  | 'stepped_bismuth'
+  | 'wind_wisps'
+  | 'speckled_granite'
   | 'custom_map';
 
 export interface FieldContribution {
@@ -301,6 +355,8 @@ export interface SnakeEntity {
   petCount: number;
 }
 
+export type BreedingOutcomeKind = 'mix' | 'complex' | 'synthesis';
+
 export interface ClutchEgg {
   id: string;
   revealed: boolean;
@@ -309,6 +365,9 @@ export interface ClutchEgg {
   oddsLabel: string;
   wasMutation: boolean;
   mutationLocusName: string | null;
+  wasSynthesis?: boolean;
+  synthesisLocusName?: string | null;
+  synthesisTier?: number;
   sold?: boolean;
   snake: SnakeEntity;
 }
@@ -336,6 +395,9 @@ export interface BreedingOddsEntry {
   rarity: MorphRarity;
   isDiscovered: boolean;
   includesUpsideDown: boolean;
+  outcomeKind?: BreedingOutcomeKind;
+  synthesisTier?: number;
+  synthesisResultLocus?: LocusId;
 }
 
 export interface SpinePoint {

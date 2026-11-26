@@ -21,6 +21,7 @@ import {
   evaluatePhenotype,
   formatOddsLabel,
   LOCI_ORDER,
+  LOCUS_DEFINITIONS,
 } from './genetics';
 import type {
   AllelePair,
@@ -351,11 +352,9 @@ function inferGenotypeCodeFromMorphKey(morphKey: string): string {
     else if (part === 'chevron') push('chevron', 1);
     else if (part === 'raindrop') push('raindrop', 2);
     else if (part === 'obsidian-cobblestone') {
-      push('magma', 2);
-      push('tidal', 2);
+      push('obsidian', 1);
     } else if (part === 'cobblestone') {
-      push('magma', 1);
-      push('tidal', 1);
+      push('cobblestone', 1);
     } else if (part === 'super-lava') push('magma', 2);
     else if (part === 'lava') push('magma', 1);
     else if (part === 'super-water') push('tidal', 2);
@@ -382,6 +381,22 @@ function inferGenotypeCodeFromMorphKey(morphKey: string): string {
     else if (part === 'cinnamon') push('cinnamon', 1);
     else if (part === 'super-blade') push('blade', 2);
     else if (part === 'blade') push('blade', 1);
+    else {
+      // Generic fallback across all Element & Mineral synthesis loci (names & superNames)
+      for (const loc of LOCI_ORDER) {
+        const def = LOCUS_DEFINITIONS[loc];
+        const normName = def.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        const normSuper = (def.superName ?? `Super ${def.name}`).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        if (part === normSuper && def.mode === 'codominant') {
+          push(loc, 2);
+          break;
+        }
+        if (part === normName) {
+          push(loc, def.mode === 'recessive' ? 2 : 1);
+          break;
+        }
+      }
+    }
   }
   return tokens.join(',');
 }

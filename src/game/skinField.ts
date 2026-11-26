@@ -575,6 +575,219 @@ export const SKIN_FIELD_PRIMITIVES: Record<SkinFieldPrimitiveId, SkinField> = {
     },
   },
 
+  mineral_veins: {
+    sample(u, v, seed, p) {
+      // Multi-mode flowing veins:
+      // woodgrain=1 -> longitudinal wood planks with organic elliptical knots
+      // marble=1 -> sparse crisp branching Carrara marble veins on clean stone
+      // default -> flowing brushed metallic / ore veins
+      const freq = (p?.frequency ?? 1.0) * 7.5;
+      const sharpness = p?.sharpness ?? 2.4;
+      const woodgrain = (p?.woodgrain ?? 0) >= 0.5;
+      const marble = (p?.marble ?? 0) >= 0.5;
+
+      if (woodgrain) {
+        // Longitudinal wood grain rings + natural organic knots along the body
+        const knotU = 0.36 + (hash2D(7, 13, seed + 1.4) - 0.5) * 0.25;
+        const knotV = (hash2DB(19, 3, seed + 5.2) - 0.5) * 0.65;
+        const knotU2 = 0.72 + (hash2D(23, 5, seed + 9.1) - 0.5) * 0.2;
+        const knotV2 = -knotV * 0.8;
+        const dK1 = Math.hypot((u - knotU) * 3.8, (v - knotV) * 1.4);
+        const dK2 = Math.hypot((u - knotU2) * 3.8, (v - knotV2) * 1.4);
+        const knotPull = Math.exp(-dK1 * 3.5) * 0.45 + Math.exp(-dK2 * 3.5) * 0.4;
+        const grainWarp = (fbm2D(u * 4.5, v * 2.2, seed + 4.3, 2) - 0.5) * 0.32;
+        const ringPhase = (v * 4.2 + grainWarp + knotPull) * Math.PI * 2;
+        const grain = 0.5 + 0.5 * Math.sin(ringPhase);
+        const fineGrain = 0.5 + 0.5 * Math.sin(ringPhase * 2.7 + fbm2D(u * 14, v * 4, seed + 12.1, 2) * 2.4);
+        return clamp(Math.pow(grain, 1.4) * 0.72 + fineGrain * 0.28, 0, 1);
+      }
+
+      if (marble) {
+        // Sparse sharp branching marble fractures across clean pale stone
+        const warpU = (fbm2D(u * 5.2, v * 2.4, seed + 4.3, 3) - 0.5) * 0.32;
+        const warpV = (fbm2D(u * 5.6 + 3.1, v * 2.6, seed + 17.9, 3) - 0.5) * 0.55;
+        const n1 = fbm2D((u + warpU) * freq * 0.75, (v + warpV) * 1.9, seed + 2.7, 3);
+        const crack1 = Math.pow(clamp(1 - Math.abs(n1 * 2 - 1), 0, 1), sharpness + 2.6);
+        const n2 = fbm2D((u - warpU * 0.7) * freq * 1.25 + 4.2, (v + warpV * 0.8) * 2.7, seed + 29.4, 2);
+        const crack2 = Math.pow(clamp(1 - Math.abs(n2 * 2 - 1), 0, 1), sharpness + 3.8) * 0.75;
+        return clamp(Math.max(crack1, crack2) * 1.15, 0, 1);
+      }
+
+      const warpU = (fbm2D(u * freq * 0.65, v * 2.2, seed + 4.3, 2) - 0.5) * 0.22;
+      const warpV = (fbm2D(u * freq * 0.72 + 3.1, v * 2.4, seed + 17.9, 2) - 0.5) * 0.38;
+      const su = (u + warpU) * freq;
+      const sv = (v + warpV) * 2.3;
+      const n1 = fbm2D(su, sv, seed + 2.7, 3);
+      const ridge1 = Math.pow(clamp(1 - Math.abs(n1 * 2 - 1), 0, 1), sharpness);
+      const n2 = fbm2D(su * 1.85 + 5.1, sv * 1.7 + 2.3, seed + 29.4, 2);
+      const ridge2 = Math.pow(clamp(1 - Math.abs(n2 * 2 - 1), 0, 1), sharpness + 0.6) * 0.72;
+      return clamp(Math.max(ridge1, ridge2), 0, 1);
+    },
+  },
+
+  crystal_facets: {
+    sample(u, v, seed, p) {
+      // Crisp polygonal Voronoi crystal planes & luminous edge ridges (Quartz, Obsidian, Frost, Basalt, Gems, Diamond)
+      const freq = (p?.frequency ?? 1.0) * 8.0;
+      const ridgeOnly = (p?.ridgeOnly ?? 0) >= 0.5;
+      const hexColumns = (p?.hexColumns ?? 0) >= 0.5;
+
+      if (hexColumns) {
+        // Columnar volcanic basalt pillars: regular staggered hexagonal cracks with slight volcanic jitter
+        const gx = u * freq * 1.65;
+        const gy = (v * 0.5 + 0.5) * 3.4;
+        const row = Math.floor(gy);
+        const stagger = (row % 2) * 0.5;
+        const ix = Math.floor(gx + stagger);
+        let d1 = 1e9;
+        let d2 = 1e9;
+        let shade = 0.5;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const ry = row + dy;
+            const st = ((ry % 2) + 2) % 2 * 0.5;
+            const cx = ix + dx - st + 0.5 + (hash2D(ix + dx, ry, seed + 3.1) - 0.5) * 0.24;
+            const cy = ry + 0.5 + (hash2DB(ix + dx, ry, seed + 7.7) - 0.5) * 0.22;
+            const dist = Math.hypot((gx - cx) * 1.05, (gy - cy) * 1.15);
+            if (dist < d1) {
+              d2 = d1;
+              d1 = dist;
+              shade = hash2D(ix + dx + 13, ry + 29, seed + 2.5);
+            } else if (dist < d2) {
+              d2 = dist;
+            }
+          }
+        }
+        const crack = 1 - smoothstep(0.03, 0.12, d2 - d1);
+        return clamp(Math.max(crack * 0.96, (0.28 + shade * 0.44)), 0, 1);
+      }
+
+      const gx = u * freq * 1.45;
+      const gy = (v * 0.5 + 0.5) * Math.max(2.6, freq * 0.42);
+      const ix = Math.floor(gx);
+      const iy = Math.floor(gy);
+      let d1 = 1e9;
+      let d2 = 1e9;
+      let cellShade = 0.5;
+      let nearDx = 0;
+      let nearDy = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const cx = ix + dx + 0.14 + hash2D(ix + dx, iy + dy, seed + 9.2) * 0.72;
+          const cy = iy + dy + 0.14 + hash2DB(ix + dx, iy + dy, seed + 21.6) * 0.72;
+          const ox = gx - cx;
+          const oy = gy - cy;
+          const dist = Math.hypot(ox, oy);
+          if (dist < d1) {
+            d2 = d1;
+            d1 = dist;
+            nearDx = ox;
+            nearDy = oy;
+            cellShade = hash2D(ix + dx + 43, iy + dy + 17, seed + 5.1);
+          } else if (dist < d2) {
+            d2 = dist;
+          }
+        }
+      }
+      const edgeRidge = 1 - smoothstep(0.025, 0.11, d2 - d1);
+      if (ridgeOnly) {
+        return clamp(edgeRidge * 0.96, 0, 1);
+      }
+      // Quantized flat-shaded polygonal crystal facet planes + crisp geometric edge bevels
+      const facetAngle = Math.floor(cellShade * 4) / 3;
+      const planeGrad = clamp(0.12 + facetAngle * 0.58 + (nearDx * 0.22 - nearDy * 0.18), 0.06, 0.78);
+      return clamp(Math.max(planeGrad, edgeRidge * 0.95), 0, 1);
+    },
+  },
+
+  banded_agate: {
+    sample(u, v, seed, p) {
+      // Multi-mode geological contours:
+      // strata=1 -> sweeping sedimentary canyon layers & wind-carved sand dunes
+      // damascus=1 -> tight high-frequency folded Damascus steel metal ripples
+      // default -> bold concentric botryoidal Malachite & banded geode Agate bullseye rings
+      const freq = (p?.frequency ?? 1.0) * 6.5;
+      const isStrata = (p?.strata ?? 0) >= 0.5;
+      const isDamascus = (p?.damascus ?? 0) >= 0.5;
+
+      if (isDamascus) {
+        const w = fbm2D(u * 6.5, v * 2.2, seed + 9.3, 3);
+        const ripple = 0.5 + 0.5 * Math.sin((u * 14 + v * 3.2 + w * 4.8) * Math.PI * 2);
+        return clamp(smoothstep(0.22, 0.78, ripple), 0, 1);
+      }
+
+      if (isStrata) {
+        const wave = fbm2D(u * freq * 0.75, v * 1.5, seed + 6.4, 3);
+        const phase = (v * 2.1 + u * freq * 0.32 + (wave - 0.5) * 2.1) * Math.PI * 2;
+        const band = 0.5 + 0.5 * Math.sin(phase);
+        const subBand = 0.5 + 0.5 * Math.sin(phase * 2.3 + 0.9);
+        return clamp(smoothstep(0.22, 0.8, band * 0.72 + subBand * 0.28), 0, 1);
+      }
+
+      // Bold concentric swirling Malachite / Agate rings
+      const warpU = (fbm2D(u * 4.5, v * 2.0, seed + 14.8, 3) - 0.5) * 0.25;
+      const warpV = (fbm2D(u * 5.0 + 3.7, v * 2.2, seed + 27.3, 3) - 0.5) * 0.35;
+      const n = fbm2D((u + warpU) * freq * 0.85, (v + warpV) * 2.1, seed + 33.1, 3);
+      const rings = 0.5 + 0.5 * Math.sin(n * Math.PI * 2 * (freq * 0.82) + seed * 11);
+      return clamp(smoothstep(0.28, 0.74, rings), 0, 1);
+    },
+  },
+
+  stepped_bismuth: {
+    sample(u, v, seed, p) {
+      // Quantized Manhattan-distance nested rectangular hopper-crystal terraces (Bismuth!)
+      const freq = (p?.frequency ?? 1.0) * 8.5;
+      const gx = u * freq * 1.4;
+      const gy = (v * 0.5 + 0.5) * 3.1;
+      const ix = Math.floor(gx);
+      const iy = Math.floor(gy);
+      let minManh = 1e9;
+      let cellHash = 0.5;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const cx = ix + dx + 0.2 + hash2D(ix + dx, iy + dy, seed + 3.4) * 0.6;
+          const cy = iy + dy + 0.2 + hash2DB(ix + dx, iy + dy, seed + 19.8) * 0.6;
+          const d = Math.max(Math.abs(gx - cx) * 1.1, Math.abs(gy - cy) * 1.1);
+          if (d < minManh) {
+            minManh = d;
+            cellHash = hash2D(ix + dx + 11, iy + dy + 23, seed + 7.9);
+          }
+        }
+      }
+      const steps = 3.5 + Math.floor(cellHash * 2);
+      const terrace = (minManh * steps) % 1;
+      const rim = 1 - smoothstep(0.14, 0.28, Math.min(terrace, 1 - terrace));
+      const depthFill = smoothstep(0.18, 0.55, minManh) * 0.52;
+      return clamp(Math.max(rim * 0.92, depthFill), 0, 1);
+    },
+  },
+
+  wind_wisps: {
+    sample(u, v, seed, p) {
+      // Flowing aerodynamic wind streamlines & curled mist eddies (Air, Pressure, Ash/Smoke)
+      const freq = (p?.frequency ?? 1.0) * 5.0;
+      const eddy = (fbm2D(u * freq * 0.9, v * 1.8, seed + 11.2, 3) - 0.5) * 1.45;
+      const stream1 = 1 - Math.abs(Math.sin((v * 2.3 + eddy + Math.sin(u * Math.PI * 2 * 2.5 + seed * 5) * 0.35) * Math.PI));
+      const stream2 = 1 - Math.abs(Math.sin((v * 3.8 - eddy * 0.8 + u * 2.2) * Math.PI));
+      const gustMask = smoothstep(0.28, 0.76, fbm2D(u * 4.2 + 7.1, v * 1.4, seed + 23.8, 2));
+      return clamp(Math.max(Math.pow(stream1, 3.0) * gustMask, Math.pow(stream2, 4.2) * 0.72), 0, 1);
+    },
+  },
+
+  speckled_granite: {
+    sample(u, v, seed, p) {
+      // Multi-scale crystalline mineral grain: feldspar crystals + fine dark mica flecks (Granite, Lapis, Amber)
+      const freq = (p?.frequency ?? 1.0) * 20;
+      const coarse = valueNoise2D(u * freq * 1.15, v * (freq * 0.36), seed + 5.3);
+      const medium = valueNoise2D(u * freq * 2.1 + 7.4, v * (freq * 0.65) + 3.1, seed + 19.1);
+      const fine = valueNoise2D(u * freq * 3.6 + 13.2, v * (freq * 1.1) + 8.7, seed + 41.7);
+      const mica = smoothstep(0.62, 0.76, coarse) * 0.92;
+      const quartzGrain = smoothstep(0.68, 0.84, medium) * 0.75;
+      const dust = smoothstep(0.72, 0.88, fine) * 0.55;
+      return clamp(Math.max(mica, quartzGrain, dust), 0, 1);
+    },
+  },
+
   custom_map: {
     sample(u, v, _seed, p) {
       const id = p && typeof p.mapHash === 'number' ? String(p.mapHash) : undefined;
@@ -1038,7 +1251,10 @@ export function synthesizeSkinBuffer(
   const mottleStrength = hasMottle ? clamp(palette.mottleStrength ?? 0, 0, 0.85) : 0;
 
   const hasCobblestone = spec.contributions.some((c) => c.field === 'cellular_pavers');
+  const hasCrystals = spec.contributions.some((c) => c.field === 'crystal_facets');
   const isLeucistic = palette.isLeucistic;
+  const baseOpacity = clamp(palette.bodyOpacity ?? 1, 0.18, 1);
+  const isTranslucent = baseOpacity < 0.99;
 
   for (let y = 0; y < height; y++) {
     // v in [-1, 1] from left flank (y=0) to right flank (y=height-1)
@@ -1115,9 +1331,9 @@ export function synthesizeSkinBuffer(
           if (pullA > 0.005) localBase = mixRgb(localBase, cMottleA, pullA);
           if (pullB > 0.005) localBase = mixRgb(localBase, cMottleB, pullB);
         }
-        // Subtle per-paver stone shading when Cobblestone/Obsidian Cobblestone is active (never paves over other genes!)
+        // Subtle per-paver stone shading when Cobblestone is active (never paves over other genes!)
         if (hasCobblestone) {
-          const stoneShade = (sample.accentMask - 0.5) * 0.28;
+          const stoneShade = (sample.accentMask - 0.5) * 0.42;
           if (stoneShade > 0) {
             localBase = mixRgb(localBase, cSec, stoneShade);
           } else {
@@ -1125,13 +1341,18 @@ export function synthesizeSkinBuffer(
           }
         }
         // Secondary blushing / lower-flank flaming
-        col = mixRgb(localBase, cSec, sample.secondaryMask * (hasCobblestone ? 0.38 : 0.68));
+        col = mixRgb(localBase, cSec, sample.secondaryMask * (hasCobblestone ? 0.32 : 0.68));
         // 2) Third pigment region (e.g. Milk Band vivid scarlet rings)
         if (!hasCobblestone && sample.accentMask > 0.01) {
           col = mixRgb(col, cAccent, sample.accentMask * bodyFade);
         }
-        // 3) Primary dark pattern mask (carries both cobblestone mortar AND any combined morph patterns!)
+        // 3) Primary dark pattern mask (carries mortar, facets, veins, stripes, rings, etc.)
         col = mixRgb(col, cPrim, sample.primaryMask * bodyFade);
+        // 3b) Crisp crystalline facet specular edge glints when crystal_facets is active
+        if (hasCrystals && sample.rawField > 0.78) {
+          const glint = smoothstep(0.78, 0.95, sample.rawField) * 0.52 * bodyFade;
+          col = mixRgb(col, cSec, glint);
+        }
       }
 
       // 4) Regional white suppression (Calico high-white flanks + Piebald bold patches)
@@ -1148,7 +1369,22 @@ export function synthesizeSkinBuffer(
       out[idx] = Math.round(clamp(col.r * lightMul, 0, 255));
       out[idx + 1] = Math.round(clamp(col.g * lightMul, 0, 255));
       out[idx + 2] = Math.round(clamp(col.b * lightMul, 0, 255));
-      out[idx + 3] = 255;
+
+      // Per-pixel alpha translucency for Air, Glass, Diamond, Frost, Quartz, Gems:
+      // Open base stays gossamer/see-through while wind wisps, crystal edges, and Piebald patches stay denser!
+      if (isTranslucent) {
+        const wispDensity = sample.primaryMask * 0.36 * bodyFade;
+        const rimDensity = Math.pow(Math.abs(v), 2.8) * 0.18;
+        const pieOpaque = sample.suppressionMask * bodyFade;
+        const alpha = clamp(
+          lerp(clamp(baseOpacity + wispDensity + rimDensity, baseOpacity * 0.7, 0.96), 1.0, pieOpaque),
+          0.18,
+          1
+        );
+        out[idx + 3] = Math.round(alpha * 255);
+      } else {
+        out[idx + 3] = 255;
+      }
     }
   }
 

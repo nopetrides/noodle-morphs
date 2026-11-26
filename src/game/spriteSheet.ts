@@ -5,7 +5,8 @@ import {
   LOCUS_DEFINITIONS,
   resolveSkinSpecForPhenotype,
 } from './genetics';
-import { globalSkinCache } from './skinCache';
+import { requestSkinAsync, scheduleCanvasPaint } from './renderScheduler';
+import { type CachedSkinEntry, globalSkinCache } from './skinCache';
 import { renderProceduralSnake } from './snakeRenderer';
 import { createSpine } from './spine';
 import type {
@@ -44,7 +45,27 @@ export interface SpriteSheetLayout {
   rows: number;
   cellW: number;
   cellH: number;
+  pad: number;
+  innerGap: number;
+  pairGap: number;
+  rowGap: number;
+  headerH: number;
+  pairCount: number;
 }
+
+export interface ProgressiveSpriteSheetCallbacks {
+  onProgress?: (completed: number, total: number) => void;
+  onComplete?: (total: number) => void;
+}
+
+export interface ProgressiveSpriteSheetHandle {
+  layout: SpriteSheetLayout;
+  entries: MorphSheetEntry[];
+  cancel: () => void;
+}
+
+const SHEET_TEX_W = 192;
+const SHEET_TEX_H = 48;
 
 function dosageLabelFor(mode: InheritanceMode, dosage: '1x' | '2x'): string {
   if (mode === 'recessive') return dosage === '1x' ? 'Het 1×' : 'Vis 2×';
@@ -53,8 +74,8 @@ function dosageLabelFor(mode: InheritanceMode, dosage: '1x' | '2x'): string {
 }
 
 /**
- * Builds the canonical 61-snake reference sheet entries:
- * 1 Base (Classic Normal) + 30 Loci × (1× single/het + 2× visual/super).
+ * Builds the canonical reference sheet entries:
+ * 1 Base (Classic Normal) + N Loci × (1× single/het + 2× visual/super).
  */
 export function buildMorphSheetEntries(seed = 0.42): MorphSheetEntry[] {
   const entries: MorphSheetEntry[] = [];
@@ -106,35 +127,92 @@ export function buildMorphSheetEntries(seed = 0.42): MorphSheetEntry[] {
   return entries;
 }
 
+export function computeSpriteSheetLayout(
+  entryCount: number,
+  includeUnwrappedStrip = true
+): SpriteSheetLayout {
+  const cols = 6; // 3 gene pairs per row ([1x, 2x] × 3)
+  const pairCount = Math.ceil(Math.max(0, entryCount - 1) / 2);
+  const rows = Math.max(1, Math.ceil(pairCount / 3));
+
+  const pad = 24;
+  const cellW = 264;
+  const cellH = includeUnwrappedStrip ? 168 : 148;
+  const innerGap = 6;
+  const pairGap = 14;
+  const rowGap = 10;
+  const headerH = cellH;
+
+  const width = pad * 2 + cols * cellW + 3 * innerGap + 2 * pairGap;
+  const height = pad * 2 + headerH + 16 + rows * cellH + (rows - 1) * rowGap;
+
+  return {
+    width,
+    height,
+    cols,
+    rows,
+    cellW,
+    cellH,
+    pad,
+    innerGap,
+    pairGap,
+    rowGap,
+    headerH,
+    pairCount,
+  };
+}
+
+function getColX(col: number, layout: SpriteSheetLayout): number {
+  const pairIdx = Math.floor(col / 2);
+  const inPair = col % 2;
+  return (
+    layout.pad +
+    pairIdx * (layout.cellW * 2 + layout.innerGap + layout.pairGap) +
+    inPair * (layout.cellW + layout.innerGap)
+  );
+}
+
+function getEntryCellPosition(
+  entryIndex: number,
+  layout: SpriteSheetLayout
+): { x: number; y: number } {
+  if (entryIndex === 0) {
+    return { x: layout.pad, y: layout.pad };
+  }
+  const pairIndex = Math.floor((entryIndex - 1) / 2);
+  const inPair = (entryIndex - 1) % 2;
+  const row = Math.floor(pairIndex / 3);
+  const pairCol = pairIndex % 3;
+  const gridTop = layout.pad + layout.headerH + 16;
+  return {
+    x: getColX(pairCol * 2 + inPair, layout),
+    y: gridTop + row * (layout.cellH + layout.rowGap),
+  };
+}
+
 /**
- * Builds a deterministic, graceful S-curved preview spine inside a bounding box
- * so all 61 snakes share identical curvature for apples-to-apples visual comparison.
+ * Builds a deterministic, graceful S-curved preview spine centered inside a local
+ * (0, 0, boxW, boxH) bounding box so all snakes share identical curvature and geometry.
  */
-function createReferencePreviewSpine(
-  centerX: number,
-  centerY: number,
-  boxW: number,
-  boxH: number
-): SnakeSpine {
+function createReferencePreviewSpine(boxW: number, boxH: number): SnakeSpine {
+  const centerX = boxW * 0.5;
+  const centerY = boxH * 0.52;
   const segCount = 24;
   const segLen = Math.min(boxW * 0.036, 7.6);
   const baseRadius = Math.min(boxH * 0.145, 11.4);
   const spine = createSpine(centerX, centerY, 0, segCount, segLen, baseRadius);
 
-  // Lay out a clean horizontal S-curve centered at (centerX, centerY)
   const spanX = Math.min(boxW * 0.72, segCount * segLen * 0.88);
   const ampY = Math.min(boxH * 0.24, 18);
 
   for (let i = 0; i < spine.points.length; i++) {
     const t = i / (spine.points.length - 1);
-    // Head on right-upper, graceful S-wave flowing left to tail
     const x = centerX + spanX * (0.5 - t);
     const y = centerY - Math.sin(t * Math.PI * 2.15 - 0.35) * ampY;
     spine.points[i].x = x;
     spine.points[i].y = y;
   }
 
-  // Recompute clean tangent angles pointing toward the head (index 0)
   for (let i = 0; i < spine.points.length; i++) {
     const p = spine.points[i];
     if (i === 0) {
@@ -183,15 +261,31 @@ function truncateText(ctx: CanvasRenderingContext2D, text: string, maxWidth: num
   return out + '…';
 }
 
-function drawSnakeCell(
+function getViewportBounds(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  includeUnwrappedStrip: boolean
+) {
+  const snakeTop = y + 28;
+  const snakeH = includeUnwrappedStrip ? h - 68 : h - 48;
+  const snakeW = w - 16;
+  const snakeX = x + 8;
+  return { snakeX, snakeTop, snakeW, snakeH };
+}
+
+/**
+ * Draws the instant placeholder shell for a sprite sheet cell (border, title, dosage badge,
+ * tinted placeholder silhouette, empty UV strip slot, and footer metadata).
+ */
+function drawSnakeCellShell(
   ctx: CanvasRenderingContext2D,
   entry: MorphSheetEntry,
   x: number,
   y: number,
   w: number,
   h: number,
-  seed: number,
-  debugStage: SkinDebugStage,
   includeUnwrappedStrip: boolean
 ): void {
   const isHetHidden = entry.mode === 'recessive' && entry.dosage === '1x';
@@ -255,63 +349,45 @@ function drawSnakeCell(
       : `${String(entry.index).padStart(2, '0')} · ${entry.phenotype.morphName}`;
   ctx.fillText(truncateText(ctx, titleText, titleMaxW), x + padX, y + 16);
 
-  // Snake viewport area
-  const snakeTop = y + 28;
-  const snakeH = includeUnwrappedStrip ? h - 68 : h - 48;
-  const snakeW = w - 16;
-  const snakeX = x + 8;
-
+  // Snake viewport area + lightweight tinted placeholder silhouette
+  const { snakeX, snakeTop, snakeW, snakeH } = getViewportBounds(x, y, w, h, includeUnwrappedStrip);
   drawRoundedRect(ctx, snakeX, snakeTop, snakeW, snakeH, 7);
   ctx.fillStyle = '#14110E';
   ctx.fill();
 
   ctx.save();
-  drawRoundedRect(ctx, snakeX, snakeTop, snakeW, snakeH, 7);
-  ctx.clip();
-
-  const spine = createReferencePreviewSpine(
-    snakeX + snakeW * 0.5,
-    snakeTop + snakeH * 0.52,
-    snakeW,
-    snakeH
+  ctx.lineCap = 'round';
+  ctx.lineWidth = 10;
+  ctx.globalAlpha = 0.22;
+  ctx.strokeStyle = entry.phenotype.palette.base || '#8C7456';
+  const midY = snakeTop + snakeH * 0.52;
+  ctx.beginPath();
+  ctx.moveTo(snakeX + snakeW * 0.16, midY + 8);
+  ctx.bezierCurveTo(
+    snakeX + snakeW * 0.36,
+    midY - 18,
+    snakeX + snakeW * 0.64,
+    midY + 18,
+    snakeX + snakeW * 0.84,
+    midY - 6
   );
-  renderProceduralSnake(ctx, spine, entry.phenotype, {
-    showShadow: true,
-    showNameTag: false,
-    debugStage,
-    seedOverride: seed,
-  });
+  ctx.stroke();
   ctx.restore();
 
-  // Optional miniature unwrapped (u, v) strip right below the curved snake
-  const spec = resolveSkinSpecForPhenotype(entry.phenotype);
+  // Empty UV strip placeholder slot
   if (includeUnwrappedStrip) {
     const stripY = snakeTop + snakeH + 5;
     const stripH = 16;
-    const stripW = snakeW;
-    const cached = globalSkinCache.getOrSynthesize(
-      spec,
-      entry.phenotype.palette,
-      seed,
-      192,
-      48,
-      debugStage
-    );
-    if (cached.canvas) {
-      ctx.save();
-      drawRoundedRect(ctx, snakeX, stripY, stripW, stripH, 3);
-      ctx.clip();
-      ctx.imageSmoothingEnabled = true;
-      ctx.drawImage(cached.canvas, snakeX, stripY, stripW, stripH);
-      ctx.restore();
-      drawRoundedRect(ctx, snakeX, stripY, stripW, stripH, 3);
-      ctx.strokeStyle = 'rgba(216, 188, 135, 0.22)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
+    drawRoundedRect(ctx, snakeX, stripY, snakeW, stripH, 3);
+    ctx.fillStyle = '#171310';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(216, 188, 135, 0.14)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
   }
 
   // Footer metadata line (locus name + key field readout)
+  const spec = resolveSkinSpecForPhenotype(entry.phenotype);
   ctx.font = '500 9.5px ui-monospace, SFMono-Regular, Menlo, monospace';
   ctx.fillStyle = '#9E907C';
   ctx.textAlign = 'left';
@@ -332,43 +408,69 @@ function drawSnakeCell(
 }
 
 /**
- * Renders the complete 61-snake sprite sheet (1 Base + 30 Loci × [1×, 2×]) onto an HTMLCanvasElement.
- * Pairs every gene's 1× and 2× side-by-side across 3 pairs (6 columns) × 10 rows beneath the Base header row.
+ * Fills the snake viewport + optional UV strip of an already-shelled cell using a single
+ * shared pre-synthesized skin buffer (eliminating duplicate 256×64 + 192×48 synthesis).
  */
-export function renderMorphSpriteSheet(
-  canvas: HTMLCanvasElement,
-  options: SpriteSheetOptions = {}
-): { layout: SpriteSheetLayout; entries: MorphSheetEntry[] } {
-  const seed = options.seed ?? 0.42;
-  const debugStage = options.debugStage ?? 'final';
-  const includeUnwrappedStrip = options.includeUnwrappedStrip ?? true;
+function drawSnakeCellContent(
+  ctx: CanvasRenderingContext2D,
+  entry: MorphSheetEntry,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  seed: number,
+  debugStage: SkinDebugStage,
+  includeUnwrappedStrip: boolean,
+  sharedSpine: SnakeSpine,
+  cachedSkin: CachedSkinEntry
+): void {
+  const { snakeX, snakeTop, snakeW, snakeH } = getViewportBounds(x, y, w, h, includeUnwrappedStrip);
 
-  const entries = buildMorphSheetEntries(seed);
-  const cols = 6; // 3 gene pairs per row ([1x, 2x] × 3)
-  const pairCount = Math.ceil((entries.length - 1) / 2); // 30 pairs
-  const rows = Math.ceil(pairCount / 3); // 10 rows
+  // Overwrite placeholder silhouette inside the viewport
+  drawRoundedRect(ctx, snakeX, snakeTop, snakeW, snakeH, 7);
+  ctx.fillStyle = '#14110E';
+  ctx.fill();
 
-  const pad = 24;
-  const cellW = 264;
-  const cellH = includeUnwrappedStrip ? 168 : 148;
-  const innerGap = 6;
-  const pairGap = 14;
-  const rowGap = 10;
-  const headerH = cellH;
+  ctx.save();
+  drawRoundedRect(ctx, snakeX, snakeTop, snakeW, snakeH, 7);
+  ctx.clip();
+  ctx.translate(snakeX, snakeTop);
 
-  const width = pad * 2 + cols * cellW + 3 * innerGap + 2 * pairGap;
-  const height = pad * 2 + headerH + 16 + rows * cellH + (rows - 1) * rowGap;
+  renderProceduralSnake(ctx, sharedSpine, entry.phenotype, {
+    showShadow: true,
+    showNameTag: false,
+    debugStage,
+    seedOverride: seed,
+    cachedSkinOverride: cachedSkin,
+  });
+  ctx.restore();
 
-  canvas.width = width;
-  canvas.height = height;
-
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    return {
-      layout: { width, height, cols, rows, cellW, cellH },
-      entries,
-    };
+  if (includeUnwrappedStrip && cachedSkin.canvas) {
+    const stripY = snakeTop + snakeH + 5;
+    const stripH = 16;
+    const stripW = snakeW;
+    ctx.save();
+    drawRoundedRect(ctx, snakeX, stripY, stripW, stripH, 3);
+    ctx.clip();
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(cachedSkin.canvas, snakeX, stripY, stripW, stripH);
+    ctx.restore();
+    drawRoundedRect(ctx, snakeX, stripY, stripW, stripH, 3);
+    ctx.strokeStyle = 'rgba(216, 188, 135, 0.22)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
   }
+}
+
+function drawSheetChromeAndPlaceholders(
+  ctx: CanvasRenderingContext2D,
+  entries: MorphSheetEntry[],
+  layout: SpriteSheetLayout,
+  seed: number,
+  debugStage: SkinDebugStage,
+  includeUnwrappedStrip: boolean
+): void {
+  const { width, height, pad, cellW, cellH, headerH, innerGap, pairGap, rowGap, cols, rows, pairCount } = layout;
 
   // Deep archival warm charcoal backdrop
   ctx.fillStyle = '#120F0C';
@@ -378,9 +480,10 @@ export function renderMorphSpriteSheet(
   ctx.fillStyle = '#D9A754';
   ctx.fillRect(0, 0, width, 3);
 
-  // Top Header Row: Left = Base Classic Normal (#00), Right = Sheet Title & Legend
-  const baseEntry = entries[0];
-  drawSnakeCell(ctx, baseEntry, pad, pad, cellW, headerH, seed, debugStage, includeUnwrappedStrip);
+  // Top Header Row: Left = Base Classic Normal (#00) placeholder, Right = Sheet Title & Legend
+  if (entries[0]) {
+    drawSnakeCellShell(ctx, entries[0], pad, pad, cellW, headerH, includeUnwrappedStrip);
+  }
 
   const bannerX = pad + cellW + pairGap;
   const bannerW = width - pad - bannerX;
@@ -395,12 +498,16 @@ export function renderMorphSpriteSheet(
   ctx.textBaseline = 'top';
   ctx.font = '700 24px Georgia, serif';
   ctx.fillStyle = '#F7F1E5';
-  ctx.fillText('Morpharium — 61-Snake Morph Reference Sheet', bannerX + 24, pad + 24);
+  ctx.fillText(
+    `Morpharium — ${entries.length}-Snake Morph Reference Sheet`,
+    bannerX + 24,
+    pad + 24
+  );
 
   ctx.font = '500 13px system-ui, -apple-system, sans-serif';
   ctx.fillStyle = '#C9BBA7';
   ctx.fillText(
-    '1 Base Wild-Type + 30 Loci paired side-by-side at 1× (Het / Single) and 2× (Visual / Super) · Includes unwrapped (u, v) skin strips',
+    `1 Base Wild-Type + ${pairCount} Loci paired side-by-side at 1× (Het / Single) and 2× (Visual / Super) · Includes unwrapped (u, v) skin strips`,
     bannerX + 24,
     pad + 58
   );
@@ -408,7 +515,7 @@ export function renderMorphSpriteSheet(
   ctx.font = '600 12px ui-monospace, SFMono-Regular, Menlo, monospace';
   ctx.fillStyle = '#E4BE74';
   ctx.fillText(
-    `TOTAL: ${entries.length} SNAKES   ·   SEED: ${seed.toFixed(3)}   ·   STAGE: ${debugStage.toUpperCase()}   ·   LAYOUT: BASE + 30 PAIRS (6 × 10)`,
+    `TOTAL: ${entries.length} SNAKES   ·   SEED: ${seed.toFixed(3)}   ·   STAGE: ${debugStage.toUpperCase()}   ·   LAYOUT: BASE + ${pairCount} PAIRS (${cols} × ${rows})`,
     bannerX + 24,
     pad + 92
   );
@@ -436,14 +543,7 @@ export function renderMorphSpriteSheet(
     lx += iw + 10;
   }
 
-  // Helper for column X accounting for paired spacing ([0,1] | [2,3] | [4,5])
-  const colX = (col: number): number => {
-    const pairIdx = Math.floor(col / 2);
-    const inPair = col % 2;
-    return pad + pairIdx * (cellW * 2 + innerGap + pairGap) + inPair * (cellW + innerGap);
-  };
-
-  // Render 30 paired genes (entries 1..60)
+  // Draw pair halos + all placeholder card shells immediately (frame 0)
   const gridTop = pad + headerH + 16;
   for (let p = 0; p < pairCount; p++) {
     const row = Math.floor(p / 3);
@@ -453,43 +553,177 @@ export function renderMorphSpriteSheet(
     const entry1 = entries[1 + p * 2];
     const entry2 = entries[2 + p * 2];
 
-    // Subtle pair grouping halo behind [1x, 2x]
-    const px = colX(pairCol * 2) - 3;
+    const px = getColX(pairCol * 2, layout) - 3;
     const pw = cellW * 2 + innerGap + 6;
     drawRoundedRect(ctx, px, y - 3, pw, cellH + 6, 12);
     ctx.fillStyle = entry1?.isCustom ? 'rgba(92, 60, 145, 0.12)' : 'rgba(216, 188, 135, 0.04)';
     ctx.fill();
 
     if (entry1) {
-      drawSnakeCell(
-        ctx,
-        entry1,
-        colX(pairCol * 2),
-        y,
-        cellW,
-        cellH,
-        seed,
-        debugStage,
-        includeUnwrappedStrip
-      );
+      drawSnakeCellShell(ctx, entry1, getColX(pairCol * 2, layout), y, cellW, cellH, includeUnwrappedStrip);
     }
     if (entry2) {
-      drawSnakeCell(
-        ctx,
-        entry2,
-        colX(pairCol * 2 + 1),
-        y,
-        cellW,
-        cellH,
-        seed,
-        debugStage,
-        includeUnwrappedStrip
-      );
+      drawSnakeCellShell(ctx, entry2, getColX(pairCol * 2 + 1, layout), y, cellW, cellH, includeUnwrappedStrip);
     }
+  }
+}
+
+/**
+ * Progressive, non-blocking sprite sheet renderer:
+ * 1) Immediately draws the full backdrop, banner, legend, and ALL placeholder cards on frame 0.
+ * 2) Offloads skin synthesis for each snake to Web Workers in small concurrent batches.
+ * 3) Paints completed cells progressively under a frame budget without locking the browser UI.
+ */
+export function renderMorphSpriteSheetProgressive(
+  canvas: HTMLCanvasElement,
+  options: SpriteSheetOptions = {},
+  callbacks: ProgressiveSpriteSheetCallbacks = {}
+): ProgressiveSpriteSheetHandle {
+  const seed = options.seed ?? 0.42;
+  const debugStage = options.debugStage ?? 'final';
+  const includeUnwrappedStrip = options.includeUnwrappedStrip ?? true;
+
+  const entries = buildMorphSheetEntries(seed);
+  const layout = computeSpriteSheetLayout(entries.length, includeUnwrappedStrip);
+
+  canvas.width = layout.width;
+  canvas.height = layout.height;
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    callbacks.onComplete?.(entries.length);
+    return { layout, entries, cancel: () => {} };
+  }
+
+  // Frame 0: paint entire grid of placeholders immediately
+  drawSheetChromeAndPlaceholders(ctx, entries, layout, seed, debugStage, includeUnwrappedStrip);
+  callbacks.onProgress?.(0, entries.length);
+
+  const { snakeW, snakeH } = getViewportBounds(0, 0, layout.cellW, layout.cellH, includeUnwrappedStrip);
+  const sharedSpine = createReferencePreviewSpine(snakeW, snakeH);
+
+  let cancelled = false;
+  let nextIndex = 0;
+  let completed = 0;
+  const pendingPaintCancels = new Set<() => void>();
+
+  const CONCURRENCY = 6;
+
+  const pumpNext = () => {
+    if (cancelled || nextIndex >= entries.length) return;
+    const idx = nextIndex++;
+    const entry = entries[idx];
+    const spec = resolveSkinSpecForPhenotype(entry.phenotype);
+
+    requestSkinAsync(spec, entry.phenotype.palette, seed, SHEET_TEX_W, SHEET_TEX_H, debugStage, 'normal')
+      .then((cachedSkin) => {
+        if (cancelled) return;
+        const cancelPaint = scheduleCanvasPaint(() => {
+          pendingPaintCancels.delete(cancelPaint);
+          if (cancelled) return;
+          const pos = getEntryCellPosition(idx, layout);
+          drawSnakeCellContent(
+            ctx,
+            entry,
+            pos.x,
+            pos.y,
+            layout.cellW,
+            layout.cellH,
+            seed,
+            debugStage,
+            includeUnwrappedStrip,
+            sharedSpine,
+            cachedSkin
+          );
+          completed++;
+          callbacks.onProgress?.(completed, entries.length);
+          if (completed >= entries.length) {
+            callbacks.onComplete?.(entries.length);
+          }
+        });
+        pendingPaintCancels.add(cancelPaint);
+        pumpNext();
+      })
+      .catch(() => {
+        if (cancelled) return;
+        completed++;
+        callbacks.onProgress?.(completed, entries.length);
+        if (completed >= entries.length) {
+          callbacks.onComplete?.(entries.length);
+        }
+        pumpNext();
+      });
+  };
+
+  for (let w = 0; w < Math.min(CONCURRENCY, entries.length); w++) {
+    pumpNext();
   }
 
   return {
-    layout: { width, height, cols, rows, cellW, cellH },
+    layout,
     entries,
+    cancel: () => {
+      cancelled = true;
+      for (const cancelFn of pendingPaintCancels) cancelFn();
+      pendingPaintCancels.clear();
+    },
   };
+}
+
+/**
+ * Synchronous sprite sheet renderer (kept for headless/scripted export and compatibility).
+ * Reuses a single 192×48 skin buffer per snake for both curved body and UV strip.
+ */
+export function renderMorphSpriteSheet(
+  canvas: HTMLCanvasElement,
+  options: SpriteSheetOptions = {}
+): { layout: SpriteSheetLayout; entries: MorphSheetEntry[] } {
+  const seed = options.seed ?? 0.42;
+  const debugStage = options.debugStage ?? 'final';
+  const includeUnwrappedStrip = options.includeUnwrappedStrip ?? true;
+
+  const entries = buildMorphSheetEntries(seed);
+  const layout = computeSpriteSheetLayout(entries.length, includeUnwrappedStrip);
+
+  canvas.width = layout.width;
+  canvas.height = layout.height;
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    return { layout, entries };
+  }
+
+  drawSheetChromeAndPlaceholders(ctx, entries, layout, seed, debugStage, includeUnwrappedStrip);
+
+  const { snakeW, snakeH } = getViewportBounds(0, 0, layout.cellW, layout.cellH, includeUnwrappedStrip);
+  const sharedSpine = createReferencePreviewSpine(snakeW, snakeH);
+
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const pos = getEntryCellPosition(i, layout);
+    const spec = resolveSkinSpecForPhenotype(entry.phenotype);
+    const cachedSkin = globalSkinCache.getOrSynthesize(
+      spec,
+      entry.phenotype.palette,
+      seed,
+      SHEET_TEX_W,
+      SHEET_TEX_H,
+      debugStage
+    );
+    drawSnakeCellContent(
+      ctx,
+      entry,
+      pos.x,
+      pos.y,
+      layout.cellW,
+      layout.cellH,
+      seed,
+      debugStage,
+      includeUnwrappedStrip,
+      sharedSpine,
+      cachedSkin
+    );
+  }
+
+  return { layout, entries };
 }

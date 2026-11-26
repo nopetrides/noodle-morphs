@@ -259,6 +259,7 @@ export function SaveSlotModal({
                                 phenotype={s.phenotype}
                                 width={64}
                                 height={28}
+                                animate={false}
                                 seedOverride={s.polygenicSeed}
                               />
                             ))}

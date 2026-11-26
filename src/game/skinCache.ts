@@ -76,6 +76,7 @@ export function buildSkinCacheKey(
     palette.mottleColorA ?? '',
     palette.mottleColorB ?? '',
     palette.mottleStrength ? palette.mottleStrength.toFixed(2) : '',
+    palette.bodyOpacity !== undefined && palette.bodyOpacity < 0.99 ? palette.bodyOpacity.toFixed(2) : '',
   ].join('|');
 
   return `v${spec.generatorVersion}|${width}x${height}|${debugStage}|${seed.toFixed(4)}|${paramStr}|${contribStr}|${palStr}|${spec.customMapId ?? ''}`;
@@ -112,6 +113,50 @@ export class BoundedSkinCache {
 
   constructor(maxBytes = 4 * 1024 * 1024) {
     this.maxBytes = Math.max(64 * 1024, maxBytes);
+  }
+
+  /** Pure lookup without synthesizing; refreshes LRU recency on hit. */
+  getCached(
+    spec: SkinPhenotypeSpec,
+    palette: SnakePalette,
+    seed: number,
+    width: number,
+    height: number,
+    debugStage: SkinDebugStage = 'final'
+  ): CachedSkinEntry | null {
+    const key = buildSkinCacheKey(spec, palette, seed, width, height, debugStage);
+    const existing = this.entries.get(key);
+    if (!existing) return null;
+    this.entries.delete(key);
+    this.entries.set(key, existing);
+    this.hits++;
+    return existing;
+  }
+
+  /** Stores externally synthesized pixels (e.g. from the off-main-thread skin Web Worker) into the LRU cache. */
+  putSynthesized(
+    spec: SkinPhenotypeSpec,
+    palette: SnakePalette,
+    seed: number,
+    width: number,
+    height: number,
+    pixels: Uint8ClampedArray,
+    debugStage: SkinDebugStage = 'final'
+  ): CachedSkinEntry {
+    const key = buildSkinCacheKey(spec, palette, seed, width, height, debugStage);
+    const existing = this.entries.get(key);
+    if (existing) {
+      this.entries.delete(key);
+      this.entries.set(key, existing);
+      return existing;
+    }
+    const canvas = createCanvasFromPixels(pixels, width, height);
+    const bytes = width * height * 4;
+    const entry: CachedSkinEntry = { key, width, height, bytes, pixels, canvas };
+    this.entries.set(key, entry);
+    this.totalBytes += bytes;
+    this.evictIfNeeded();
+    return entry;
   }
 
   getOrSynthesize(
@@ -174,5 +219,5 @@ export class BoundedSkinCache {
   }
 }
 
-/** Shared runtime LRU cache (~4 MiB budget: holds ~64 high-res 256×64 skins or ~160 mini 160×40 skins) */
-export const globalSkinCache = new BoundedSkinCache(4 * 1024 * 1024);
+/** Shared runtime LRU cache (~12 MiB budget: holds ~192 high-res 256×64 skins or ~320 mini 192×48 skins) */
+export const globalSkinCache = new BoundedSkinCache(12 * 1024 * 1024);

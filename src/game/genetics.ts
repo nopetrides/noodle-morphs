@@ -3,11 +3,20 @@ import {
   DEFAULT_CONTENT_FLAGS,
   hasContentFlag,
 } from './contentFlags';
+import {
+  applyAutomaticSynthesis,
+  ELEMENTAL_LOCI_ORDER,
+  ELEMENTAL_LOCUS_DEFINITIONS,
+  ELEMENTAL_VISUAL_PROFILES,
+  getElementalTier,
+  isSynthesisOnlyLocus,
+} from './elementalSynthesis';
 import { clamp, createDefaultSkinFieldParams, SKIN_GENERATOR_VERSION } from './skinField';
 import type {
   AllelePair,
   BehaviorTrait,
   BreedingOddsEntry,
+  BreedingOutcomeKind,
   ClutchEgg,
   FieldContribution,
   GeneBiasDistribution,
@@ -70,6 +79,8 @@ export const LOCI_ORDER: LocusId[] = [
   'monarch',
   'cinnamon',
   'blade',
+  // Element & Mineral Synthesis Tree (appended to preserve compact v2 save indices)
+  ...ELEMENTAL_LOCI_ORDER,
 ];
 
 export const LOCUS_DEFINITIONS: Record<LocusId, LocusDefinition> = {
@@ -493,6 +504,7 @@ export const LOCUS_DEFINITIONS: Record<LocusId, LocusDefinition> = {
     rarityWeight: 1.7,
     tags: ['Pattern'],
   },
+  ...ELEMENTAL_LOCUS_DEFINITIONS,
 };
 
 export function getLocusContentFlag(locusId: LocusId): ContentFlag {
@@ -550,47 +562,11 @@ export function formatMutationOddsText(): string {
 }
 
 export function createWildTypeGenotype(): Genotype {
-  return {
-    pastel: [0, 0],
-    mojave: [0, 0],
-    lesser: [0, 0],
-    enchi: [0, 0],
-    spider: [0, 0],
-    pinstripe: [0, 0],
-    albino: [0, 0],
-    piebald: [0, 0],
-    clown: [0, 0],
-    axanthic: [0, 0],
-    banana: [0, 0],
-    fire: [0, 0],
-    yellowbelly: [0, 0],
-    blackpastel: [0, 0],
-    ghi: [0, 0],
-    cypress: [0, 0],
-    calico: [0, 0],
-    lavenderalbino: [0, 0],
-    desertghost: [0, 0],
-    hypo: [0, 0],
-    ultramel: [0, 0],
-    saddler: [0, 0],
-    bullring: [0, 0],
-    chevron: [0, 0],
-    raindrop: [0, 0],
-    magma: [0, 0],
-    tidal: [0, 0],
-    crossbar: [0, 0],
-    trackline: [0, 0],
-    milksnake: [0, 0],
-    invert: [0, 0],
-    monsoon: [0, 0],
-    sunset: [0, 0],
-    geneticstripe: [0, 0],
-    tristripe: [0, 0],
-    leopard: [0, 0],
-    monarch: [0, 0],
-    cinnamon: [0, 0],
-    blade: [0, 0],
-  };
+  const g = {} as Genotype;
+  for (const loc of LOCI_ORDER) {
+    g[loc] = [0, 0];
+  }
+  return g;
 }
 
 export function normalizeAllelePair(a: 0 | 1, b: 0 | 1): AllelePair {
@@ -650,17 +626,23 @@ export function isEightBall(genotype: Genotype): boolean {
 }
 
 /**
- * Custom Elemental Fusion Complex: Lava (magma) + Water (tidal) -> Cobblestone!
+ * Custom Elemental Fusion Complex: Cobblestone locus OR legacy Lava (magma) + Water (tidal)!
  */
 export function isCobblestone(genotype: Genotype): boolean {
-  return countAlleles(genotype.magma) >= 1 && countAlleles(genotype.tidal) >= 1;
+  return (
+    countAlleles(genotype.cobblestone) >= 1 ||
+    (countAlleles(genotype.magma) >= 1 && countAlleles(genotype.tidal) >= 1)
+  );
 }
 
 /**
- * Super Elemental Fusion: Homozygous Lava + Homozygous Water -> Obsidian Cobblestone!
+ * Super Elemental Fusion: Obsidian locus OR legacy Homozygous Lava + Homozygous Water!
  */
 export function isObsidianCobblestone(genotype: Genotype): boolean {
-  return countAlleles(genotype.magma) === 2 && countAlleles(genotype.tidal) === 2;
+  return (
+    countAlleles(genotype.obsidian) >= 1 ||
+    (countAlleles(genotype.magma) === 2 && countAlleles(genotype.tidal) === 2)
+  );
 }
 
 const CUSTOM_PATTERN_MOTIFS = new Set<PatternMotif>([
@@ -674,6 +656,10 @@ const CUSTOM_PATTERN_MOTIFS = new Set<PatternMotif>([
   'ripples',
   'cobblestone',
   'milk_bands',
+  'veins',
+  'facets',
+  'strata',
+  'bismuth',
 ]);
 
 function formatMotifFormulaLabel(motif: PatternMotif): string {
@@ -736,10 +722,24 @@ export function derivePatternRule(genotype: Genotype, polygenicSeed: number): Pa
   let weight: PatternWeight = 'medium';
   let modifier: PatternModifier = 'banded';
 
-  if (cobblestone) {
+  const legacyCobbleOnly =
+    cobblestone && countAlleles(genotype.cobblestone) === 0 && countAlleles(genotype.obsidian) === 0;
+  const activeElementalProfiles = ELEMENTAL_VISUAL_PROFILES.filter((prof) => {
+    const c = countAlleles(genotype[prof.locusId]);
+    const def = LOCUS_DEFINITIONS[prof.locusId];
+    return def.mode === 'recessive' ? c === 2 : c >= 1;
+  });
+
+  if (legacyCobbleOnly) {
     motif = 'cobblestone';
     weight = obsidianCobble ? 'broad' : 'medium';
     modifier = obsidianCobble ? 'speckled' : 'banded';
+  } else if (activeElementalProfiles.length > 0) {
+    // Pick highest-tier active elemental/mineral profile for pattern rule metadata
+    const top = activeElementalProfiles.reduce((best, cur) => (cur.tier >= best.tier ? cur : best));
+    motif = top.motif;
+    weight = top.weight;
+    modifier = top.modifier;
   } else if (magma >= 1) {
     motif = 'magma_cracks';
     weight = magma === 2 ? 'broad' : 'thin';
@@ -921,6 +921,10 @@ function buildPatternGlyph(
   if (motif === 'magma_cracks') return '/\\~/\\~/\\';
   if (motif === 'ripples') return '≈~≈~≈~≈';
   if (motif === 'milk_bands') return '▓█░█▓█░';
+  if (motif === 'veins') return '~/~\\~/~';
+  if (motif === 'facets') return '◇◆◇◆◇◆◇';
+  if (motif === 'strata') return '≡≈≡≈≡≈≡';
+  if (motif === 'bismuth') return '回·回·回';
   if (motif === 'bars') return '| | | | |';
   if (motif === 'tracks') return modifier === 'dotted' ? '-o-o-o-' : '=======';
   if (modifier === 'faded') return '· · · · ·';
@@ -1008,9 +1012,10 @@ function removeMelaninColor(
   const minC = Math.min(r, g, b);
   const chroma = maxC - minC;
 
-  // 1) Pure dark melanin (low luminance + low chroma -> black/espresso/charcoal): removing melanin leaves crisp ivory-white
-  if (lum < 92 && chroma < 62) {
-    const residualTint = lum < 60 && chroma < 35 ? 0 : clamp((chroma - 24) / 50, 0, 0.24);
+  // 1) Pure dark melanin (low luminance + low chroma -> black/espresso/charcoal, or very dark shadow pattern):
+  //    removing dark eumelanin leaves crisp ivory-white (with tiny hue echo on dark gem shadows for high contrast!)
+  if ((lum < 92 && chroma < 62) || (isPatternChannel && lum < 78)) {
+    const residualTint = lum < 60 && chroma < 35 ? 0 : clamp((chroma - 24) / 140, 0, 0.22);
     if (residualTint < 0.04) return whiteTarget;
     const scale = 248 / Math.max(1, maxC);
     const tinted = rgbToHex(
@@ -1034,11 +1039,17 @@ function removeMelaninColor(
     clamp(g * liftScale * 0.86 + 24, 0, 255),
     clamp(b * liftScale * 0.84 + 22, 0, 255)
   );
-  // Wild-type tan (#B5894F: r-g=44, b<g) sits near yellow; strong orange/red (r-g > 55) or cool/blue/purple (b >= g*0.85) keep full hue
+  // Wild-type tan (#B5894F: r-g=44, b<g) sits near yellow; strong orange/red, green (Malachite/Emerald/Jade),
+  // or cool/blue/purple hues keep their vivid hue cleanly when melanin is stripped!
   const orangePull = clamp((r - g - 44) / 72, 0, 1);
+  const greenPull = clamp((g - r - 18) / 78, 0, 1);
   const coolPull = clamp((b - Math.min(r, g) + 8) / 95, 0, 1);
   const highChromaPull = clamp((chroma - 75) / 100, 0, 1);
-  const hueKeep = clamp(Math.max(orangePull * 0.94, coolPull * 0.92, highChromaPull * 0.88), 0, 0.95);
+  const hueKeep = clamp(
+    Math.max(orangePull * 0.94, greenPull * 0.92, coolPull * 0.92, highChromaPull * 0.88),
+    0,
+    0.95
+  );
   return mixHex(isPatternChannel ? whiteTarget : yellowTarget, lifted, hueKeep);
 }
 
@@ -1310,13 +1321,25 @@ function derivePalette(genotype: Genotype, polygenicSeed = 0.5): SnakePalette {
     belly = '#FDFBF7';
   }
 
-  // Elemental hue layers: precalc fusion (Water x Lava -> Cobblestone / Obsidian Cobblestone) participates
-  // in symmetric pigment blending rather than paving over Cinnamon, 8-Ball, Sunset, Monarch, etc.!
-  const hasElemental = cobblestone || magma >= 1 || tidal >= 1;
+  // Elemental hue layers: symmetric dosage-scaled composition across all Element & Mineral loci
+  // (Water, Lava, plus all 35 Tier 0-5 loci in ELEMENTAL_VISUAL_PROFILES — never paves over other genes!)
+  const activeElementals: Array<{ profile: (typeof ELEMENTAL_VISUAL_PROFILES)[number]; count: 1 | 2 }> = [];
+  for (const prof of ELEMENTAL_VISUAL_PROFILES) {
+    const c = countAlleles(genotype[prof.locusId]);
+    const def = LOCUS_DEFINITIONS[prof.locusId];
+    const isVisual = def.mode === 'recessive' ? c === 2 : c >= 1;
+    if (isVisual) {
+      activeElementals.push({ profile: prof, count: c as 1 | 2 });
+    }
+  }
+  const legacyCobbleOnly =
+    cobblestone && countAlleles(genotype.cobblestone) === 0 && countAlleles(genotype.obsidian) === 0;
+  const hasElemental = cobblestone || magma >= 1 || tidal >= 1 || activeElementals.length > 0;
   const hasPriorPigment =
     pigmentVoices.length > 0 || isStrongMelanistic || blackpastel === 1 || ghi >= 1;
   const hasPriorChromatic = pigmentVoices.some((v) => v.weight >= 0.6);
-  if (cobblestone) {
+
+  if (legacyCobbleOnly) {
     const stoneBase = obsidianCobble ? '#4C505D' : '#858B92';
     const stonePrim = obsidianCobble ? '#1C1E26' : '#31363E';
     const stoneSec = obsidianCobble ? '#8B94A0' : '#BCC3CB';
@@ -1332,30 +1355,83 @@ function derivePalette(genotype: Genotype, polygenicSeed = 0.5): SnakePalette {
     eyePupil = '#141210';
     headBlush = mixHex(headBlush, stoneHead, stoneMix);
     addPigmentVoice(stoneBase, obsidianCobble ? 0.72 : 0.56);
-  } else if (magma >= 1) {
-    const lavaWeight = magma === 2 ? (hasPriorChromatic ? 0.62 : 0.88) : 0.5;
-    base = mixHex(base, magma === 2 ? '#1E1412' : '#2C1F1C', lavaWeight);
-    patternPrimary = mixHex(patternPrimary, magma === 2 ? '#FF5A14' : '#F46A1F', magma === 2 ? 0.9 : 0.58);
-    patternSecondary = mixHex(patternSecondary, '#FFD35E', magma === 2 ? 0.85 : 0.55);
-    belly = mixHex(belly, '#4A2B20', lavaWeight);
-    outline = '#110B0A';
-    eyeIris = '#FFA02E';
-    eyePupil = '#3D0F06';
-    headBlush = mixHex(headBlush, '#FF7D2A', lavaWeight);
-    addPigmentVoice(magma === 2 ? '#FF5A14' : '#E86826', magma === 2 ? 0.86 : 0.52);
-  } else if (tidal >= 1) {
-    const waterWeight = tidal === 2 ? (hasPriorChromatic ? 0.54 : 0.86) : 0.48;
-    const waterBase = tidal === 2 ? '#1E6996' : '#2D85B2';
-    base = mixHex(base, waterBase, waterWeight);
-    patternPrimary = mixHex(patternPrimary, '#8CE5F4', tidal === 2 ? 0.84 : 0.54);
-    patternSecondary = mixHex(patternSecondary, '#DDFBFF', tidal === 2 ? 0.82 : 0.52);
-    belly = mixHex(belly, '#E3F8FC', waterWeight);
-    outline = mixHex(outline, '#123A52', waterWeight);
-    eyeIris = '#5FE7FA';
-    eyePupil = '#0A2536';
-    headBlush = mixHex(headBlush, '#76D7EB', waterWeight);
-    addPigmentVoice(waterBase, tidal === 2 ? 0.92 : 0.55);
+  } else {
+    if (magma >= 1) {
+      const lavaWeight = magma === 2 ? (hasPriorChromatic ? 0.62 : 0.88) : 0.5;
+      base = mixHex(base, magma === 2 ? '#1E1412' : '#2C1F1C', lavaWeight);
+      patternPrimary = mixHex(patternPrimary, magma === 2 ? '#FF5A14' : '#F46A1F', magma === 2 ? 0.9 : 0.58);
+      patternSecondary = mixHex(patternSecondary, '#FFD35E', magma === 2 ? 0.85 : 0.55);
+      belly = mixHex(belly, '#4A2B20', lavaWeight);
+      outline = '#110B0A';
+      eyeIris = '#FFA02E';
+      eyePupil = '#3D0F06';
+      headBlush = mixHex(headBlush, '#FF7D2A', lavaWeight);
+      addPigmentVoice(magma === 2 ? '#FF5A14' : '#E86826', magma === 2 ? 0.86 : 0.52);
+    }
+    if (tidal >= 1) {
+      const waterWeight = tidal === 2 ? (hasPriorChromatic || magma >= 1 ? 0.54 : 0.86) : 0.48;
+      const waterBase = tidal === 2 ? '#1E6996' : '#2D85B2';
+      base = mixHex(base, waterBase, waterWeight);
+      patternPrimary = mixHex(patternPrimary, '#8CE5F4', tidal === 2 ? 0.84 : 0.54);
+      patternSecondary = mixHex(patternSecondary, '#DDFBFF', tidal === 2 ? 0.82 : 0.52);
+      belly = mixHex(belly, '#E3F8FC', waterWeight);
+      outline = mixHex(outline, '#123A52', waterWeight);
+      eyeIris = '#5FE7FA';
+      eyePupil = '#0A2536';
+      headBlush = mixHex(headBlush, '#76D7EB', waterWeight);
+      addPigmentVoice(waterBase, tidal === 2 ? 0.92 : 0.55);
+    }
   }
+
+  // Symmetric blending for all 35 Element & Mineral synthesis loci (Tiers 0-5)
+  let intrinsicMottle: { a: string; b: string; strength: number } | null = null;
+  let translucentSum = 0;
+  let translucentCount = 0;
+  for (const { profile, count } of activeElementals) {
+    const hasExisting = hasPriorPigment || magma >= 1 || tidal >= 1 || pigmentVoices.length > 0;
+    const rawDosage = count === 2 ? profile.dosage2x : profile.dosage1x;
+    const mixAmt = hasExisting ? Math.min(rawDosage, 0.62) : rawDosage;
+    const targetBase = count === 2 ? profile.superBaseHex : profile.baseHex;
+    const targetPrim = count === 2 ? (profile.superPrimaryHex ?? profile.primaryHex) : profile.primaryHex;
+    const targetSec = count === 2 ? (profile.superSecondaryHex ?? profile.secondaryHex) : profile.secondaryHex;
+    const targetHead = count === 2 ? (profile.superHeadHex ?? profile.headHex) : profile.headHex;
+    base = mixHex(base, targetBase, mixAmt);
+    patternPrimary = mixHex(patternPrimary, targetPrim, hasExisting ? Math.min(mixAmt + 0.1, 0.72) : Math.min(rawDosage + 0.12, 0.94));
+    patternSecondary = mixHex(patternSecondary, targetSec, mixAmt);
+    headBlush = mixHex(headBlush, targetHead, mixAmt);
+    if (profile.bellyHex) belly = mixHex(belly, profile.bellyHex, mixAmt);
+    if (profile.outlineHex) outline = mixHex(outline, profile.outlineHex, mixAmt);
+    if (profile.eyeIrisHex && !albino && !lavenderAlbino) eyeIris = profile.eyeIrisHex;
+    if (profile.eyePupilHex && !albino && !lavenderAlbino) eyePupil = profile.eyePupilHex;
+    if (profile.accentHex && !accentColor) accentColor = profile.accentHex;
+    addPigmentVoice(profile.voiceHex, count === 2 ? profile.voiceWeight2x : profile.voiceWeight1x);
+
+    const op = count === 2 ? (profile.bodyOpacity2x ?? profile.bodyOpacity1x) : profile.bodyOpacity1x;
+    if (op !== undefined && op < 0.99) {
+      translucentSum += op;
+      translucentCount++;
+    }
+
+    if (
+      profile.intrinsicMottleA &&
+      profile.intrinsicMottleB &&
+      (!profile.intrinsicMottleSuperOnly || count === 2)
+    ) {
+      intrinsicMottle = {
+        a: profile.intrinsicMottleA,
+        b: profile.intrinsicMottleB,
+        strength: profile.intrinsicMottleStrength ?? 0.62,
+      };
+    }
+  }
+  // Translucent genes (Air, Glass, Diamond, Frost, Quartz, Sap, Amber, Gems) blend opacity gracefully with opaque partners!
+  const hasOpaquePartner =
+    hasPriorPigment || magma >= 1 || tidal >= 1 || banana >= 1 || activeElementals.length > translucentCount;
+  const rawOpacity = translucentCount > 0 ? translucentSum / translucentCount : 1;
+  const bodyOpacity =
+    translucentCount > 0
+      ? clamp(hasOpaquePartner ? rawOpacity * 0.68 + 0.32 : rawOpacity, 0.28, 1)
+      : 1;
 
   // Tricolor Milk Band scarlet saddle accent
   if (milksnake >= 1 && !cobblestone) {
@@ -1414,12 +1490,12 @@ function derivePalette(genotype: Genotype, polygenicSeed = 0.5): SnakePalette {
   }
 
   // Emergent dual-pigment "mixed paint" mottling: whenever two opposing/distant chromatic pigment voices
-  // combine (e.g. Water + Sunset, Water + Banana, Sunset + Monarch), the blended midpoint sits between
-  // organic swirling patches where each constituent pigment dominates!
+  // combine (e.g. Water + Sunset, Malachite + Sunset, Ruby + Sapphire), or a multi-hue mineral (Opal, Bismuth,
+  // Verdigris Copper, Crying Obsidian) is expressed, swirling patches preserve each pigment!
   let mottleColorA: string | undefined;
   let mottleColorB: string | undefined;
   let mottleStrength = 0;
-  if (pigmentVoices.length >= 2 && !cobblestone && !axanthic) {
+  if (pigmentVoices.length >= 2 && !axanthic) {
     let bestDist = 0;
     let bestA: { hex: string; weight: number } | null = null;
     let bestB: { hex: string; weight: number } | null = null;
@@ -1438,6 +1514,11 @@ function derivePalette(genotype: Genotype, polygenicSeed = 0.5): SnakePalette {
       mottleColorB = bestB.hex;
       mottleStrength = clamp(((bestDist - 105) / 120) * Math.min(bestA.weight, bestB.weight) * 0.95, 0.28, 0.78);
     }
+  }
+  if (!mottleColorA && intrinsicMottle && !axanthic) {
+    mottleColorA = intrinsicMottle.a;
+    mottleColorB = intrinsicMottle.b;
+    mottleStrength = intrinsicMottle.strength;
   }
 
   const preAlbinoBase = base;
@@ -1666,6 +1747,7 @@ function derivePalette(genotype: Genotype, polygenicSeed = 0.5): SnakePalette {
     ...(mottleColorA && mottleColorB && !isLeucistic
       ? { mottleColorA, mottleColorB, mottleStrength }
       : {}),
+    ...(bodyOpacity < 0.99 && !isLeucistic ? { bodyOpacity } : {}),
   };
 }
 
@@ -2232,23 +2314,36 @@ export function deriveSkinPhenotypeSpec(
   }
 
   // --- Composable Custom Mathematical Fields (always interact with the shared cellular field) ---
-  if (cobblestone) {
-    // Precalc fusion (Water x Lava -> Cobblestone / Obsidian Cobblestone):
-    // Etches crisp running-bond mortar grooves via smoothUnion (NEVER paves over Tri-Stripe, Cinnamon, etc.!)
-    const targetCov = obsidianCobble ? 0.62 : 0.54;
-    params.coverage = params.coverage * 0.5 + targetCov * 0.5;
-    params.edgeSoftness = Math.min(params.edgeSoftness, 0.032);
-    params.warpStrength = Math.min(params.warpStrength, 0.18);
-    params.scaleRelief = 0.22;
+  const legacyCobbleOnly =
+    cobblestone && countAlleles(genotype.cobblestone) === 0 && countAlleles(genotype.obsidian) === 0;
+  const hasExplicitAlienEyes =
+    mojave === 1 || lesser === 1 || blackpastel === 1 || cinnamon === 1 || leopard >= 1;
+  if (legacyCobbleOnly) {
+    // Legacy Lava + Water fusion fallback: crisp running-bond cobblestone bricks via symmetric blend + mortar union
+    const targetCov = obsidianCobble ? 0.62 : 0.56;
+    params.coverage = params.coverage * 0.45 + targetCov * 0.55;
+    params.edgeSoftness = Math.min(params.edgeSoftness, 0.024);
+    params.warpStrength = Math.min(params.warpStrength, 0.14);
+    params.scaleRelief = 0.16;
+    if (!hasExplicitAlienEyes) {
+      params.eyeCount = 0;
+      params.eyeStrength = 0;
+    }
+    contributions.push({
+      field: 'cellular_pavers',
+      operation: 'blend',
+      strength: 0.88,
+      frequency: obsidianCobble ? 1.15 : 1.0,
+    });
     contributions.push({
       field: 'cellular_pavers',
       operation: 'smoothUnion',
-      strength: 0.82,
+      strength: 0.24,
       frequency: obsidianCobble ? 1.15 : 1.0,
     });
   } else {
     if (magma >= 1) {
-      params.coverage = magma === 2 ? 0.58 : 0.46;
+      params.coverage = params.coverage * 0.5 + (magma === 2 ? 0.58 : 0.46) * 0.5;
       params.warpStrength += 0.25;
       contributions.push({
         field: 'magma_fissures',
@@ -2258,9 +2353,8 @@ export function deriveSkinPhenotypeSpec(
       });
     }
     if (tidal >= 1) {
-      params.coverage = tidal === 2 ? 0.54 : 0.46;
+      params.coverage = params.coverage * 0.5 + (tidal === 2 ? 0.54 : 0.46) * 0.5;
       params.blush += 0.25;
-      // Water ripples & distorts the underlying cellular field via coordinate warp + gentle caustic modulation
       contributions.push({
         field: 'water_caustics',
         operation: 'warp',
@@ -2274,6 +2368,34 @@ export function deriveSkinPhenotypeSpec(
         frequency: tidal === 2 ? 1.18 : 1.0,
       });
     }
+  }
+
+  // Symmetric bespoke contributions for all 35 Element & Mineral synthesis loci (Tiers 0-5)
+  let activeElementalCount = 0;
+  for (const prof of ELEMENTAL_VISUAL_PROFILES) {
+    const c = countAlleles(genotype[prof.locusId]);
+    const def = LOCUS_DEFINITIONS[prof.locusId];
+    const isVisual = def.mode === 'recessive' ? c === 2 : c >= 1;
+    if (!isVisual) continue;
+    activeElementalCount++;
+    const count = c as 1 | 2;
+    const covDelta = count === 2 ? (prof.coverageDelta2x ?? prof.coverageDelta1x ?? 0) : (prof.coverageDelta1x ?? 0);
+    params.coverage += covDelta;
+    if (prof.edgeSoftness !== undefined) params.edgeSoftness = Math.min(params.edgeSoftness, prof.edgeSoftness);
+    if (prof.blushDelta) params.blush += prof.blushDelta;
+    if (prof.flankFlameDelta) params.flankFlame += prof.flankFlameDelta;
+    if (prof.warpDelta) params.warpStrength += prof.warpDelta;
+    if (prof.speckleAmount) params.speckleAmount = Math.max(params.speckleAmount, prof.speckleAmount);
+    if (prof.scaleRelief !== undefined) params.scaleRelief = Math.min(params.scaleRelief, prof.scaleRelief);
+    for (const contrib of prof.buildContributions(count)) {
+      contributions.push(contrib);
+    }
+  }
+  // Clear Classic's default twin alien-head eyes on bespoke mineral textures unless an explicit alien-head gene is paired
+  if (activeElementalCount > 0 && !hasExplicitAlienEyes) {
+    params.eyeCount = 0;
+    params.eyeStrength = 0;
+    params.dorsalBias = Math.max(params.dorsalBias, 0);
   }
 
   if (milksnake >= 1 && !cobblestone) {
@@ -2810,13 +2932,15 @@ export function evaluatePhenotype(genotype: Genotype, polygenicSeed = 0.5): Snak
     hetGenes.push('Inverted');
   }
 
-  // Extreme Custom Elemental Fusion: Lava + Water -> Cobblestone!
-  if (obsidianCobble) {
-    visualGenes.push('Obsidian Cobblestone');
-    addTags('magma');
-    addTags('tidal');
-  } else if (cobblestone) {
-    visualGenes.push('Cobblestone');
+  // Extreme Custom Elemental Fusion & Synthesis Tree (Water, Lava, plus all 35 Tier 0-5 loci)
+  const legacyCobbleOnly =
+    cobblestone && countAlleles(genotype.cobblestone) === 0 && countAlleles(genotype.obsidian) === 0;
+  if (legacyCobbleOnly) {
+    if (obsidianCobble) {
+      visualGenes.push('Obsidian Cobblestone');
+    } else {
+      visualGenes.push('Cobblestone');
+    }
     addTags('magma');
     addTags('tidal');
   } else {
@@ -2833,6 +2957,35 @@ export function evaluatePhenotype(genotype: Genotype, polygenicSeed = 0.5): Snak
     } else if (tidal === 1) {
       visualGenes.push('Water');
       addTags('tidal');
+    }
+  }
+
+  let maxElementalTier = 0;
+  let elementalRecessiveVisuals = 0;
+  let elementalSupers = 0;
+  for (const loc of ELEMENTAL_LOCI_ORDER) {
+    const c = countAlleles(genotype[loc]);
+    if (c === 0) continue;
+    const def = LOCUS_DEFINITIONS[loc];
+    const tier = getElementalTier(loc) ?? 0;
+    if (def.mode === 'recessive') {
+      if (c === 2) {
+        visualGenes.push(def.name);
+        addTags(loc);
+        elementalRecessiveVisuals += 1;
+        if (tier > maxElementalTier) maxElementalTier = tier;
+      } else {
+        hetGenes.push(def.name);
+      }
+    } else if (c === 2) {
+      visualGenes.push(def.superName ?? `Super ${def.name}`);
+      addTags(loc);
+      elementalSupers += 1;
+      if (tier > maxElementalTier) maxElementalTier = tier;
+    } else {
+      visualGenes.push(def.name);
+      addTags(loc);
+      if (tier > maxElementalTier) maxElementalTier = tier;
     }
   }
 
@@ -2925,7 +3078,7 @@ export function evaluatePhenotype(genotype: Genotype, polygenicSeed = 0.5): Snak
     healthPredisposition = 'Peaceful temperament · curls neatly beside river stones';
   }
 
-  // Rarity tier based on recessive count, super/complex forms, and gene stacking
+  // Rarity tier based on recessive count, super/complex forms, synthesis tier, and gene stacking
   const recessiveVisualCount =
     (albino === 2 ? 1 : 0) +
     (piebald === 2 ? 1 : 0) +
@@ -2935,7 +3088,8 @@ export function evaluatePhenotype(genotype: Genotype, polygenicSeed = 0.5): Snak
     (desertghost === 2 ? 1 : 0) +
     (hypo === 2 ? 1 : 0) +
     (ultramel === 2 ? 1 : 0) +
-    (raindrop === 2 ? 1 : 0);
+    (raindrop === 2 ? 1 : 0) +
+    elementalRecessiveVisuals;
   const superCount =
     (pastel === 2 ? 1 : 0) +
     (enchi === 2 ? 1 : 0) +
@@ -2951,20 +3105,27 @@ export function evaluatePhenotype(genotype: Genotype, polygenicSeed = 0.5): Snak
     (blackEl ? 1 : 0) +
     (ivory ? 1 : 0) +
     (eightBall ? 1 : 0) +
-    (cobblestone ? 1 : 0);
+    (cobblestone ? 1 : 0) +
+    elementalSupers;
 
   let rarity: MorphRarity = 'common';
   if (
     obsidianCobble ||
+    maxElementalTier >= 4 ||
     recessiveVisualCount >= 2 ||
     (recessiveVisualCount >= 1 && (visualGenes.length >= 3 || superCount >= 1)) ||
     (cobblestone && visualGenes.length >= 2) ||
     visualGenes.length >= 4
   ) {
     rarity = 'legendary';
-  } else if (recessiveVisualCount === 1 || superCount >= 1 || visualGenes.length >= 3) {
+  } else if (
+    maxElementalTier === 3 ||
+    recessiveVisualCount === 1 ||
+    superCount >= 1 ||
+    visualGenes.length >= 3
+  ) {
     rarity = 'rare';
-  } else if (visualGenes.length >= 2) {
+  } else if (maxElementalTier >= 1 || visualGenes.length >= 2) {
     rarity = 'uncommon';
   } else {
     rarity = 'common';
@@ -3060,7 +3221,8 @@ export function computeBreedingPreview(
   sire: SnakeEntity,
   dam: SnakeEntity,
   discoveredKeys: Set<string> = new Set(),
-  bias?: GeneBiasDistribution
+  bias?: GeneBiasDistribution,
+  contentFlags = DEFAULT_CONTENT_FLAGS
 ): BreedingOddsEntry[] {
   const activeLoci = LOCI_ORDER.filter(
     (loc) => countAlleles(sire.genotype[loc]) > 0 || countAlleles(dam.genotype[loc]) > 0
@@ -3105,32 +3267,88 @@ export function computeBreedingPreview(
       probability: number;
       rarity: MorphRarity;
       includesUpsideDown: boolean;
+      outcomeKind: BreedingOutcomeKind;
+      synthesisTier?: number;
+      synthesisResultLocus?: LocusId;
     }
   >();
 
   for (const out of outcomes) {
-    const pheno = evaluatePhenotype(out.genotype, 0.5);
-    const existing = byMorph.get(pheno.morphKey);
+    // Automatic (100%) elemental synthesis when CustomMorphs is enabled; bypassed cleanly when disabled
+    const { genotype: resolvedGeno, recipe } = applyAutomaticSynthesis(
+      out.genotype,
+      sire.genotype,
+      dam.genotype,
+      contentFlags
+    );
+    const pheno = evaluatePhenotype(resolvedGeno, 0.5);
+
+    let bucketKey = pheno.morphKey;
+    let displayMorphName = pheno.morphName;
+    let outcomeKind: BreedingOutcomeKind = 'mix';
+    let synthesisTier: number | undefined;
+    let synthesisResultLocus: LocusId | undefined;
+
+    if (recipe) {
+      outcomeKind = 'synthesis';
+      synthesisTier = recipe.tier;
+      synthesisResultLocus = recipe.result;
+      const resultDef = LOCUS_DEFINITIONS[recipe.result];
+      const resultCount = countAlleles(resolvedGeno[recipe.result]);
+      if (resultDef.mode === 'recessive' && resultCount === 1) {
+        // Keep recessive Het syntheses distinct from Classic Normal so players see the Synthesis callout!
+        bucketKey = `synth:${recipe.result}:het:${pheno.morphKey}`;
+        displayMorphName =
+          pheno.morphKey === 'normal'
+            ? `Het ${resultDef.name}`
+            : `${pheno.morphName} (Het ${resultDef.name})`;
+      } else {
+        bucketKey = `synth:${recipe.result}:${pheno.morphKey}`;
+      }
+    } else if (
+      isBlueEyedLeucistic(resolvedGeno) ||
+      isBlackEyedLeucistic(resolvedGeno) ||
+      isIvory(resolvedGeno) ||
+      isEightBall(resolvedGeno) ||
+      (countAlleles(resolvedGeno.albino) === 2 && countAlleles(resolvedGeno.axanthic) === 2) ||
+      (countAlleles(resolvedGeno.pastel) >= 1 && countAlleles(resolvedGeno.spider) >= 1)
+    ) {
+      outcomeKind = 'complex';
+    }
+
+    const existing = byMorph.get(bucketKey);
     if (existing) {
       existing.probability += out.prob;
     } else {
-      byMorph.set(pheno.morphKey, {
-        morphKey: pheno.morphKey,
-        morphName: pheno.morphName,
+      byMorph.set(bucketKey, {
+        morphKey: recipe ? pheno.morphKey : bucketKey,
+        morphName: displayMorphName,
         probability: out.prob,
         rarity: pheno.rarity,
         includesUpsideDown: pheno.isUpsideDown,
+        outcomeKind,
+        synthesisTier,
+        synthesisResultLocus,
       });
     }
   }
 
   return Array.from(byMorph.values())
     .sort((a, b) => b.probability - a.probability)
-    .map((entry) => ({
-      ...entry,
-      oddsLabel: formatOddsLabel(entry.probability, false),
-      isDiscovered: discoveredKeys.has(entry.morphKey),
-    }));
+    .map((entry) => {
+      const resultKey = entry.synthesisResultLocus
+        ? LOCUS_DEFINITIONS[entry.synthesisResultLocus].name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+        : null;
+      const isDiscovered =
+        entry.outcomeKind === 'synthesis' && resultKey
+          ? discoveredKeys.has(entry.morphKey) && (entry.morphKey !== 'normal' || discoveredKeys.has(resultKey))
+          : discoveredKeys.has(entry.morphKey);
+      return {
+        ...entry,
+        oddsLabel: formatOddsLabel(entry.probability, false),
+        isDiscovered,
+      };
+    });
 }
 
 const COZY_SNAKE_NAMES = [
@@ -3193,11 +3411,15 @@ export function breedClutch(
   bias?: GeneBiasDistribution,
   contentFlags = DEFAULT_CONTENT_FLAGS
 ): ClutchEgg[] {
-  const preview = computeBreedingPreview(sire, dam, discoveredKeys, bias);
-  const probByMorphKey = new Map(preview.map((e) => [e.morphKey, e.probability]));
+  const preview = computeBreedingPreview(sire, dam, discoveredKeys, bias, contentFlags);
+  const probByMorphKey = new Map<string, number>();
+  for (const e of preview) {
+    probByMorphKey.set(e.morphKey, (probByMorphKey.get(e.morphKey) ?? 0) + e.probability);
+  }
   const usedNames = new Set(existingNames);
   const clutchDiscoveredKeys = new Set(discoveredKeys);
   const enabledLoci = getEnabledLoci(contentFlags);
+  const mutatableLoci = enabledLoci.filter((loc) => !isSynthesisOnlyLocus(loc));
   const eggs: ClutchEgg[] = [];
   const now = Date.now();
 
@@ -3209,7 +3431,7 @@ export function breedClutch(
   };
 
   for (let i = 0; i < clutchSize; i++) {
-    const childGenotype = createWildTypeGenotype();
+    let childGenotype = createWildTypeGenotype();
 
     // Mendelian inheritance per locus (with optional Hiss Depot category balance)
     for (const loc of LOCI_ORDER) {
@@ -3219,11 +3441,18 @@ export function breedClutch(
       childGenotype[loc] = normalizeAllelePair(sireAllele, damAllele);
     }
 
-    // Gentle spontaneous mutation roll weighted by gene bias if set (strictly within enabled content flags)
+    // Automatic (100%) elemental synthesis when CustomMorphs is enabled; bypassed when disabled
+    const synth = applyAutomaticSynthesis(childGenotype, sire.genotype, dam.genotype, contentFlags);
+    childGenotype = synth.genotype;
+    const wasSynthesis = synth.recipe !== null;
+    const synthesisLocusName = synth.recipe ? LOCUS_DEFINITIONS[synth.recipe.result].name : null;
+    const synthesisTier = synth.recipe?.tier;
+
+    // Gentle spontaneous mutation roll weighted by gene bias if set (strictly non-synthesis enabled loci)
     let wasMutation = false;
     let mutationLocusName: string | null = null;
     if (rng() < MUTATION_CHANCE_PER_EGG) {
-      const candidates = enabledLoci.filter((loc) => {
+      const candidates = mutatableLoci.filter((loc) => {
         const current = countAlleles(childGenotype[loc]);
         // Never mutate into homozygous lethal Super Spider
         if (loc === 'spider' && current >= 1) return false;
@@ -3296,6 +3525,9 @@ export function breedClutch(
       oddsLabel,
       wasMutation: isMutatedDisplay,
       mutationLocusName: isMutatedDisplay ? mutationLocusName : null,
+      wasSynthesis,
+      synthesisLocusName,
+      synthesisTier,
       snake,
     });
   }
@@ -3488,14 +3720,17 @@ export function createStarterSnakes(): SnakeEntity[] {
 /**
  * Generates random showcase morphs exclusively for the title screen vivarium background.
  * Uses unique `title_` IDs so they are cleanly replaced when starting or loading a save.
+ * Defaults to `ContentFlag.RealMorphs` (non-custom snakes only for first-time users);
+ * custom snake categories are included only when present in `contentFlags`.
  */
 export function createTitleShowcaseSnakes(
   count = 5,
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  contentFlags: number = ContentFlag.RealMorphs
 ): SnakeEntity[] {
   const now = Date.now();
   const usedNames = new Set<string>();
-  const showcasePool = LOCI_ORDER.filter((loc) => loc !== 'spider');
+  const showcasePool = getEnabledLoci(contentFlags).filter((loc) => loc !== 'spider');
   const snakes: SnakeEntity[] = [];
 
   for (let i = 0; i < count; i++) {

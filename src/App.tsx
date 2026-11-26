@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GalleryDrawer } from './components/GalleryDrawer';
 import { HatchRevealModal } from './components/HatchRevealModal';
 import { HissDepotIntroModal } from './components/HissDepotIntroModal';
@@ -116,6 +116,19 @@ type PendingSale =
   | { kind: 'collection'; snake: SnakeEntity }
   | { kind: 'hatchling'; egg: ClutchEgg };
 
+function resolveContinueSlotSummary(slots: SaveSlotSummary[]): SaveSlotSummary | null {
+  const preferred = getLastActiveSlotId() ?? getMostRecentSaveSlot();
+  if (!preferred) return null;
+  const found = slots.find((s) => s.slotId === preferred && !s.isEmpty);
+  return found ?? slots.find((s) => !s.isEmpty) ?? null;
+}
+
+function getTitleShowcaseContentFlags(continueSlot: SaveSlotSummary | null): number {
+  return continueSlot && !continueSlot.isEmpty
+    ? continueSlot.gameConfig.contentFlags
+    : ContentFlag.RealMorphs;
+}
+
 export default function App() {
   const autostart = useMemo(() => getInitialAutostart(), []);
 
@@ -131,10 +144,16 @@ export default function App() {
   }, [autostart]);
 
   const [phase, setPhase] = useState<GamePhase>(() => (autostartBoot ? 'playing' : 'title'));
-  const [titleSnakes, setTitleSnakes] = useState<SnakeEntity[]>(() =>
-    autostartBoot ? [] : createTitleShowcaseSnakes(5)
-  );
   const [saveSlots, setSaveSlots] = useState<SaveSlotSummary[]>(() => listSaveSlots());
+  const [titleSnakes, setTitleSnakes] = useState<SnakeEntity[]>(() => {
+    if (autostartBoot) return [];
+    const initialContinue = resolveContinueSlotSummary(listSaveSlots());
+    return createTitleShowcaseSnakes(
+      5,
+      Math.random,
+      getTitleShowcaseContentFlags(initialContinue)
+    );
+  });
   const [activeSlotId, setActiveSlotId] = useState<SaveSlotId | null>(() =>
     autostartBoot ? autostartBoot.slotId : null
   );
@@ -191,12 +210,25 @@ export default function App() {
   }, []);
 
   const hasSaves = useMemo(() => saveSlots.some((s) => !s.isEmpty), [saveSlots]);
-  const continueSlot = useMemo(() => {
-    const preferred = getLastActiveSlotId() ?? getMostRecentSaveSlot();
-    if (!preferred) return null;
-    const found = saveSlots.find((s) => s.slotId === preferred && !s.isEmpty);
-    return found ?? saveSlots.find((s) => !s.isEmpty) ?? null;
-  }, [saveSlots]);
+  const continueSlot = useMemo(() => resolveContinueSlotSummary(saveSlots), [saveSlots]);
+  const titleShowcaseFlags = useMemo(
+    () => getTitleShowcaseContentFlags(continueSlot),
+    [continueSlot]
+  );
+  const lastTitleShowcaseFlagsRef = useRef<number>(titleShowcaseFlags);
+
+  // If the continue slot's enabled categories change while on the title screen (e.g. deleting a slot),
+  // refresh the background showcase snakes to match.
+  useEffect(() => {
+    if (phase !== 'title') {
+      lastTitleShowcaseFlagsRef.current = titleShowcaseFlags;
+      return;
+    }
+    if (lastTitleShowcaseFlagsRef.current !== titleShowcaseFlags) {
+      lastTitleShowcaseFlagsRef.current = titleShowcaseFlags;
+      setTitleSnakes(createTitleShowcaseSnakes(5, Math.random, titleShowcaseFlags));
+    }
+  }, [phase, titleShowcaseFlags]);
 
   const jeanPoolEnabled = hasContentFlag(gameConfig.contentFlags, ContentFlag.JeanPool);
   const hissDepotEnabled = hasContentFlag(gameConfig.contentFlags, ContentFlag.HissDepot);
@@ -539,8 +571,11 @@ export default function App() {
     setNeedsStarterConfirm(false);
     setUiEventState(createUiEventQueueState());
     setDockHighlightTab(null);
-    setTitleSnakes(createTitleShowcaseSnakes(5));
-    refreshSaveSlots();
+    const updatedSlots = listSaveSlots();
+    setSaveSlots(updatedSlots);
+    const nextTitleFlags = getTitleShowcaseContentFlags(resolveContinueSlotSummary(updatedSlots));
+    lastTitleShowcaseFlagsRef.current = nextTitleFlags;
+    setTitleSnakes(createTitleShowcaseSnakes(5, Math.random, nextTitleFlags));
     setPhase('title');
   }, [
     activeSlotId,
@@ -1513,6 +1548,7 @@ export default function App() {
           allSnakes={snakes}
           discoveredKeys={discoveredKeys}
           soldMorphKeys={soldMorphKeysSet}
+          contentFlags={gameConfig.contentFlags}
           biasWeights={effectiveHissDepot.biasWeights}
           displayedCount={displayedCount}
           maxDisplay={maxDisplay}

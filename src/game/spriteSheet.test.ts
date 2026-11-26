@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { LOCI_ORDER } from './genetics';
 import { buildMorphSheetEntries } from './spriteSheet';
 
-test('buildMorphSheetEntries generates 1 base + 2 entries per locus (79 entries for 39 loci)', () => {
+test('buildMorphSheetEntries generates 1 base + 2 entries per locus (149 entries for 74 loci)', () => {
   const entries = buildMorphSheetEntries(0.42);
   assert.equal(entries.length, 1 + LOCI_ORDER.length * 2);
-  assert.equal(entries.length, 79);
+  assert.equal(entries.length, 149);
 
   assert.equal(entries[0].locusId, 'base');
   assert.equal(entries[0].dosage, 'base');
