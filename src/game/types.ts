@@ -35,7 +35,17 @@ export type LocusId =
   | 'tidal'
   | 'crossbar'
   | 'trackline'
-  | 'milksnake';
+  | 'milksnake'
+  | 'invert'
+  // Additional Extreme Real-World Ball Python Genes (appended to preserve compact v2 save indices)
+  | 'monsoon'
+  | 'sunset'
+  | 'geneticstripe'
+  | 'tristripe'
+  | 'leopard'
+  | 'monarch'
+  | 'cinnamon'
+  | 'blade';
 
 export type InheritanceMode = 'dominant' | 'codominant' | 'recessive';
 
@@ -83,6 +93,9 @@ export type PatternMotif =
   | 'keyholes'
   | 'banded'
   | 'dorsal_stripe'
+  | 'tri_stripe'
+  | 'mosaic'
+  | 'rosettes'
   | 'lines'
   | 'webbing'
   | 'inkblot'
@@ -147,6 +160,11 @@ export interface SnakePalette {
   isAlbino: boolean;
   isPiebald: boolean;
   isCalico?: boolean;
+  isInverted?: boolean;
+  /** Emergent dual-pigment mixed-paint mottling when two chromatically distinct color genes combine */
+  mottleColorA?: string;
+  mottleColorB?: string;
+  mottleStrength?: number;
 }
 
 export type FieldOperation =
@@ -168,6 +186,8 @@ export type SkinFieldPrimitiveId =
   | 'cellular_pavers'
   | 'magma_fissures'
   | 'water_caustics'
+  | 'shattered_mosaic'
+  | 'stripe_tracks'
   | 'custom_map';
 
 export interface FieldContribution {

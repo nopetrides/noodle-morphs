@@ -171,7 +171,7 @@ test('Real Morphs Only disables all custom genes across loci, starters, Jean Poo
   assert.equal(hasContentFlag(realOnly.contentFlags, ContentFlag.CustomMorphs), false);
 
   const enabledLoci = getEnabledLoci(realOnly.contentFlags);
-  assert.equal(enabledLoci.length, 21, 'Real-only should include exactly the 21 real-world loci');
+  assert.equal(enabledLoci.length, 29, 'Real-only should include all 29 real-world loci');
   assert.ok(
     enabledLoci.every((loc) => !LOCUS_DEFINITIONS[loc].isCustom),
     'No custom loci may appear in real_only'

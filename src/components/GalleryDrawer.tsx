@@ -41,6 +41,7 @@ import type {
 import { MiniSnakeCanvas } from './MiniSnakeCanvas';
 import { MorphSimulatorPanel } from './MorphSimulatorPanel';
 import { HissDepotPanel, JeanPoolPanel } from './ShopsPanel';
+import { formatHatchedAt, isHatchDayAnniversary } from './SnakeInspectorCard';
 
 interface GalleryDrawerProps {
   activeTab: ActiveDrawerTab;
@@ -519,6 +520,29 @@ export function GalleryDrawer({
                               ? `Parents: ${snake.sire.name} (${snake.sire.morphName}) × ${snake.dam.name} (${snake.dam.morphName})`
                               : `Founder Ball Python · Gen ${snake.generation}`}
                           </div>
+
+                          {snake.hatchedAt > 0 && (() => {
+                            const now = new Date();
+                            const isHatchDay = isHatchDayAnniversary(snake.hatchedAt, now);
+                            const hatchYears = isHatchDay
+                              ? Math.abs(now.getFullYear() - new Date(snake.hatchedAt).getFullYear())
+                              : 0;
+                            return (
+                              <div className="text-[11px] text-[#9E8F7B] flex items-center gap-1">
+                                <span>Hatched {formatHatchedAt(snake.hatchedAt)}</span>
+                                {isHatchDay && (
+                                  <span
+                                    role="img"
+                                    aria-label="Hatch day anniversary"
+                                    title={`Happy Hatch Day! (${hatchYears} ${hatchYears === 1 ? 'yr' : 'yrs'})`}
+                                    className="text-xs leading-none"
+                                  >
+                                    🎂
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
 
                           {snake.phenotype.isUpsideDown && (
                             <div className="text-[11px] text-[#E6A382]">

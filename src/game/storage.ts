@@ -364,6 +364,24 @@ function inferGenotypeCodeFromMorphKey(morphKey: string): string {
     else if (part === 'trackline') push('trackline', 1);
     else if (part === 'super-milk-band') push('milksnake', 2);
     else if (part === 'milk-band') push('milksnake', 1);
+    else if (part === 'inverted') push('invert', 2);
+    else if (part === 'killer-bee') {
+      push('pastel', 2);
+      push('spider', 1);
+    } else if (part === 'bumblebee') {
+      push('pastel', 1);
+      push('spider', 1);
+    } else if (part === 'monsoon') push('monsoon', 2);
+    else if (part === 'sunset') push('sunset', 2);
+    else if (part === 'genetic-stripe') push('geneticstripe', 2);
+    else if (part === 'tri-stripe') push('tristripe', 2);
+    else if (part === 'super-leopard') push('leopard', 2);
+    else if (part === 'leopard') push('leopard', 1);
+    else if (part === 'monarch') push('monarch', 2);
+    else if (part === 'super-cinnamon') push('cinnamon', 2);
+    else if (part === 'cinnamon') push('cinnamon', 1);
+    else if (part === 'super-blade') push('blade', 2);
+    else if (part === 'blade') push('blade', 1);
   }
   return tokens.join(',');
 }
