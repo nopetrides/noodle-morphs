@@ -101,13 +101,13 @@ test('Milk Band produces 3 distinct pigment regions (cream base, black border ri
   assert.ok(scarletPixels > 10, `Expected scarlet saddles, got ${scarletPixels}`);
 });
 
-test('Milk Band x Mojave uses non-blend field modulation producing distinct emergent field vs solo genes', () => {
+test('Milk Band x Mojave uses composable field modulation producing distinct emergent field vs solo genes', () => {
   const seed = 0.42;
   const milkSolo = deriveSkinPhenotypeSpec(withGenes({ milksnake: [1, 0] }), seed);
   const mojaveSolo = deriveSkinPhenotypeSpec(withGenes({ mojave: [1, 0] }), seed);
   const combo = deriveSkinPhenotypeSpec(withGenes({ milksnake: [1, 0], mojave: [1, 0] }), seed);
 
-  assert.equal(milkSolo.contributions[0]?.operation, 'blend');
+  assert.equal(milkSolo.contributions[0]?.operation, 'modulate');
   assert.equal(combo.contributions[0]?.operation, 'modulate');
 
   let diffFromMilk = 0;
@@ -386,4 +386,186 @@ test('Real-world pattern genes differentiate silhouette params (Enchi flat, Moja
   // Cypress: large keyhole alien heads with higher regional coherence
   assert.equal(cypress.eyeCount, 1);
   assert.ok(cypress.regionalCoherence > classic.regionalCoherence, 'Cypress raises regionalCoherence');
+});
+
+test('All six field interaction modes (warp, modulate, blend, union/smoothUnion, intersection, subtract) are exercised by real & custom genotypes', () => {
+  const seed = 0.655;
+  const opsOf = (overrides: Partial<Genotype>) =>
+    deriveSkinPhenotypeSpec(withGenes(overrides), seed).contributions.map((c) => c.operation);
+
+  // Real-world gene interactions
+  assert.ok(opsOf({ enchi: [1, 0] }).includes('modulate'), 'Enchi modulates');
+  assert.ok(opsOf({ spider: [1, 0] }).includes('warp'), 'Spider warps');
+  assert.ok(opsOf({ blackpastel: [1, 0] }).includes('warp'), 'Black Pastel warps');
+  assert.ok(opsOf({ ghi: [1, 0] }).includes('warp'), 'GHI warps');
+  assert.ok(opsOf({ lesser: [1, 0] }).includes('subtract'), 'Lesser subtracts');
+  assert.ok(opsOf({ pinstripe: [1, 0] }).includes('smoothUnion'), 'Pinstripe smoothUnions');
+  assert.ok(opsOf({ cypress: [1, 0] }).includes('smoothUnion'), 'Cypress smoothUnions');
+  assert.ok(
+    opsOf({ ghi: [1, 0], enchi: [1, 0] }).includes('intersection'),
+    'GHI x Enchi intersects'
+  );
+
+  // Custom composable gene interactions
+  assert.ok(opsOf({ tidal: [1, 0] }).includes('warp'), 'Water warps');
+  assert.ok(opsOf({ crossbar: [1, 0] }).includes('intersection'), 'Crossbar intersects');
+  assert.ok(opsOf({ bullring: [1, 0] }).includes('union'), 'Bullring unions');
+  assert.ok(opsOf({ raindrop: [1, 1] }).includes('subtract'), 'Raindrop subtracts');
+  assert.ok(opsOf({ tristripe: [1, 1] }).includes('blend'), 'Tri-Stripe blends symmetrically');
+  assert.ok(opsOf({ magma: [1, 0], tidal: [1, 0] }).includes('smoothUnion'), 'Cobblestone smoothUnions mortar grooves without paving over other patterns');
+});
+
+test('Layered pigment & melanin pipeline blends Water Albino, Water Banana, Piebald Cobblestone, and Inverted Albino', () => {
+  const seed = 0.655;
+  const water = evaluatePhenotype(withGenes({ tidal: [1, 0] }), seed);
+  const waterAlbino = evaluatePhenotype(withGenes({ tidal: [1, 0], albino: [1, 1] }), seed);
+  const waterBanana = evaluatePhenotype(withGenes({ tidal: [1, 0], banana: [1, 0] }), seed);
+  const albino = evaluatePhenotype(withGenes({ albino: [1, 1] }), seed);
+  const hetInvertAlbino = evaluatePhenotype(withGenes({ albino: [1, 1], invert: [1, 0] }), seed);
+  const invertedAlbino = evaluatePhenotype(withGenes({ albino: [1, 1], invert: [1, 1] }), seed);
+
+  // Recessive Inverted: 1x is Het carrier (not inverted), 2x is fully inverted
+  assert.equal(hetInvertAlbino.palette.isInverted, false);
+  assert.ok(hetInvertAlbino.hetGenes.includes('Inverted'), '1x invert should be Het Inverted');
+
+  // Water Albino must differ clearly from solo Water and have Albino ruby eyes
+  assert.notEqual(waterAlbino.palette.base, water.palette.base);
+  assert.equal(waterAlbino.palette.isAlbino, true);
+
+  // Water Banana must shift meaningfully away from solo Water blue
+  assert.notEqual(waterBanana.palette.base, water.palette.base);
+  assert.notEqual(waterBanana.palette.patternPrimary, water.palette.patternPrimary);
+
+  // Inverted Albino flips bright Albino colors into dark tones
+  const hexLum = (hex: string) => {
+    const n = parseInt(hex.slice(1), 16);
+    return 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
+  };
+  assert.ok(hexLum(albino.palette.base) > 170, 'Classic Albino base should be bright');
+  assert.ok(hexLum(invertedAlbino.palette.base) < 90, 'Inverted Albino base should become dark');
+  assert.ok(hexLum(invertedAlbino.palette.patternPrimary) < 40, 'Inverted Albino pattern should become dark');
+  assert.equal(invertedAlbino.palette.isInverted, true);
+
+  // Piebald Cobblestone must render pure-white Piebald patches (not overwritten by Cobblestone pavers)
+  const cobble = evaluatePhenotype(withGenes({ magma: [1, 0], tidal: [1, 0] }), seed);
+  const pieCobble = evaluatePhenotype(
+    withGenes({ magma: [1, 0], tidal: [1, 0], piebald: [1, 1] }),
+    seed
+  );
+  const bufCobble = synthesizeSkinBuffer(cobble.skinSpec!, cobble.palette, seed, 96, 24, 'final');
+  const bufPieCobble = synthesizeSkinBuffer(
+    pieCobble.skinSpec!,
+    pieCobble.palette,
+    seed,
+    96,
+    24,
+    'final'
+  );
+  let brightWhitePixels = 0;
+  let diffPixels = 0;
+  for (let i = 0; i < bufPieCobble.length; i += 4) {
+    if (bufPieCobble[i] > 235 && bufPieCobble[i + 1] > 235 && bufPieCobble[i + 2] > 230) {
+      brightWhitePixels++;
+    }
+    if (
+      Math.abs(bufPieCobble[i] - bufCobble[i]) +
+        Math.abs(bufPieCobble[i + 1] - bufCobble[i + 1]) +
+        Math.abs(bufPieCobble[i + 2] - bufCobble[i + 2]) >
+      60
+    ) {
+      diffPixels++;
+    }
+  }
+  assert.ok(brightWhitePixels > 40, `Piebald Cobblestone must show white patches (got ${brightWhitePixels})`);
+  assert.ok(diffPixels > 60, `Piebald Cobblestone must visibly differ from Cobblestone (got ${diffPixels})`);
+});
+
+test('Balanced pigment vs shape weighting: Albino Sunset, 8-Ball Tri-Stripe, 1x vs 2x Water, and emergent Super Water Sunset mottling', () => {
+  const seed = 0.42;
+  const hexRgb = (hex: string) => {
+    const n = parseInt(hex.slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255] as const;
+  };
+  const hexLum = (hex: string) => {
+    const [r, g, b] = hexRgb(hex);
+    return 0.299 * r + 0.587 * g + 0.114 * b;
+  };
+
+  // 1) Albino Sunset retains vivid orange hue rather than generic yellow Albino
+  const albino = evaluatePhenotype(withGenes({ albino: [1, 1] }), seed);
+  const albinoSunset = evaluatePhenotype(withGenes({ albino: [1, 1], sunset: [1, 1] }), seed);
+  const [ar, ag] = hexRgb(albino.palette.base);
+  const [sr, sg] = hexRgb(albinoSunset.palette.base);
+  assert.ok(
+    sr - sg > ar - ag + 20,
+    `Albino Sunset (${albinoSunset.palette.base}) should be noticeably more orange than classic Albino (${albino.palette.base})`
+  );
+
+  // 2) 8-Ball Tri-Stripe stays dark/melanistic instead of turning golden
+  const eightBallTri = evaluatePhenotype(
+    withGenes({ blackpastel: [1, 1], tristripe: [1, 1] }),
+    seed
+  );
+  assert.ok(
+    hexLum(eightBallTri.palette.base) < 70,
+    `8-Ball Tri-Stripe base (${eightBallTri.palette.base}) should stay dark melanistic`
+  );
+
+  // 3) 1x Water is a lighter blue tint while 2x Super Water is significantly deeper blue
+  const water1x = evaluatePhenotype(withGenes({ tidal: [1, 0] }), seed);
+  const water2x = evaluatePhenotype(withGenes({ tidal: [1, 1] }), seed);
+  const [r1, , b1] = hexRgb(water1x.palette.base);
+  const [r2, , b2] = hexRgb(water2x.palette.base);
+  assert.ok(b2 - r2 > b1 - r1 + 15, '2x Super Water should be noticeably more blue-saturated than 1x Water');
+
+  // 4) Super Water Sunset triggers emergent dual-pigment mixed-paint mottling (blue + orange pools)
+  const waterSunset = evaluatePhenotype(withGenes({ tidal: [1, 1], sunset: [1, 1] }), seed);
+  assert.ok(
+    Boolean(waterSunset.palette.mottleColorA && waterSunset.palette.mottleColorB),
+    'Super Water Sunset should emergently populate dual-pigment mottling colors'
+  );
+  const buf = synthesizeSkinBuffer(waterSunset.skinSpec!, waterSunset.palette, seed, 128, 32, 'final');
+  let blueDominant = 0;
+  let orangeDominant = 0;
+  for (let i = 0; i < buf.length; i += 4) {
+    const r = buf[i];
+    const g = buf[i + 1];
+    const b = buf[i + 2];
+    if (b > r + 12) blueDominant++;
+    if (r > b + 20 && r > g + 8) orangeDominant++;
+  }
+  assert.ok(blueDominant > 30, `Super Water Sunset should have blue-dominant regions (got ${blueDominant})`);
+  assert.ok(orangeDominant > 30, `Super Water Sunset should have orange-dominant regions (got ${orangeDominant})`);
+
+  // 5) Cobblestone & Obsidian Cobblestone compose with Cinnamon & Tri-Stripe (no paving over!)
+  const cobble = evaluatePhenotype(withGenes({ magma: [1, 0], tidal: [1, 0] }), seed);
+  const cinCobble = evaluatePhenotype(withGenes({ magma: [1, 0], tidal: [1, 0], cinnamon: [1, 0] }), seed);
+  const triCobble = evaluatePhenotype(withGenes({ magma: [1, 0], tidal: [1, 0], tristripe: [1, 1] }), seed);
+  assert.notEqual(cinCobble.palette.base, cobble.palette.base, 'Cinnamon should visibly warm Cobblestone base');
+  const bufCob = synthesizeSkinBuffer(cobble.skinSpec!, cobble.palette, seed, 96, 24, 'final');
+  const bufTriCob = synthesizeSkinBuffer(triCobble.skinSpec!, triCobble.palette, seed, 96, 24, 'final');
+  let triDiff = 0;
+  for (let i = 0; i < bufCob.length; i += 4) {
+    if (Math.abs(bufCob[i] - bufTriCob[i]) + Math.abs(bufCob[i + 1] - bufTriCob[i + 1]) > 25) triDiff++;
+  }
+  assert.ok(triDiff > 80, `Tri-Stripe Cobblestone should visibly differ from solo Cobblestone (got ${triDiff} diff px)`);
+
+  // 6) Piebald spatial variance & genetic white pushers/anchors
+  const piedLow = evaluatePhenotype(withGenes({ piebald: [1, 1], blackpastel: [1, 1] }), 0.5);
+  const piedHigh = evaluatePhenotype(withGenes({ piebald: [1, 1], spider: [1, 0], pastel: [1, 1] }), 0.5);
+  assert.ok(
+    piedHigh.skinSpec!.params.piebaldAmount > piedLow.skinSpec!.params.piebaldAmount + 0.35,
+    'Spider Super Pastel Pied should push dramatically higher white than 8-Ball Pied'
+  );
+  // Different seeds must vary Piebald white patch locations (not identical fixed bands)
+  const piedA = evaluatePhenotype(withGenes({ piebald: [1, 1] }), 0.14);
+  const piedB = evaluatePhenotype(withGenes({ piebald: [1, 1] }), 0.77);
+  let pieSpatialDiff = 0;
+  for (let i = 0; i < 40; i++) {
+    const u = 0.18 + (i / 39) * 0.76;
+    const mA = evaluateSkinPoint(u, 0, piedA.skinSpec!, 0.14).suppressionMask;
+    const mB = evaluateSkinPoint(u, 0, piedB.skinSpec!, 0.77).suppressionMask;
+    if (Math.abs(mA - mB) > 0.4) pieSpatialDiff++;
+  }
+  assert.ok(pieSpatialDiff >= 8, `Piebald white regions should vary spatially across seeds (got ${pieSpatialDiff}/40)`);
 });

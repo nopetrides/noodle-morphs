@@ -72,6 +72,10 @@ export function buildSkinCacheKey(
     palette.accentColor ?? '',
     palette.headBlush,
     palette.isLeucistic ? 'L' : '',
+    palette.isInverted ? 'I' : '',
+    palette.mottleColorA ?? '',
+    palette.mottleColorB ?? '',
+    palette.mottleStrength ? palette.mottleStrength.toFixed(2) : '',
   ].join('|');
 
   return `v${spec.generatorVersion}|${width}x${height}|${debugStage}|${seed.toFixed(4)}|${paramStr}|${contribStr}|${palStr}|${spec.customMapId ?? ''}`;

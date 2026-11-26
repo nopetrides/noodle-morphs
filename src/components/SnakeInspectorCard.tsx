@@ -13,6 +13,27 @@ interface SnakeInspectorCardProps {
   onAssignParent: (role: 'sire' | 'dam', snakeId: string) => void;
 }
 
+export function isHatchDayAnniversary(hatchedAt: number, now: Date = new Date()): boolean {
+  if (!Number.isFinite(hatchedAt) || hatchedAt <= 0) return false;
+  const hatched = new Date(hatchedAt);
+  return (
+    hatched.getFullYear() !== now.getFullYear() &&
+    hatched.getMonth() === now.getMonth() &&
+    hatched.getDate() === now.getDate()
+  );
+}
+
+export function formatHatchedAt(hatchedAt: number): string {
+  if (!Number.isFinite(hatchedAt) || hatchedAt <= 0) return 'Unknown';
+  return new Date(hatchedAt).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 export function SnakeInspectorCard({
   snake,
   isSire,
@@ -42,6 +63,9 @@ export function SnakeInspectorCard({
   };
 
   const { phenotype } = snake;
+  const now = new Date();
+  const isHatchDay = isHatchDayAnniversary(snake.hatchedAt, now);
+  const hatchYears = isHatchDay ? Math.abs(now.getFullYear() - new Date(snake.hatchedAt).getFullYear()) : 0;
 
   return (
     <aside
@@ -147,6 +171,25 @@ export function SnakeInspectorCard({
             {Math.round(snake.currentVigor)}/{phenotype.lineageVigor} · {phenotype.behaviorLabel}
           </span>
         </div>
+
+        {snake.hatchedAt > 0 && (
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[#A89884]">Hatched</span>
+            <span className="text-[#DCD0BD] text-right flex items-center gap-1">
+              <span>{formatHatchedAt(snake.hatchedAt)}</span>
+              {isHatchDay && (
+                <span
+                  role="img"
+                  aria-label="Hatch day anniversary"
+                  title={`Happy Hatch Day! (${hatchYears} ${hatchYears === 1 ? 'yr' : 'yrs'})`}
+                  className="text-sm leading-none"
+                >
+                  🎂
+                </span>
+              )}
+            </span>
+          </div>
+        )}
 
         <p className="text-[11px] leading-relaxed text-[#C4B7A5] pt-1">
           {phenotype.healthPredisposition}

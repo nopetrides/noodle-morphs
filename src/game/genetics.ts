@@ -60,6 +60,16 @@ export const LOCI_ORDER: LocusId[] = [
   'crossbar',
   'trackline',
   'milksnake',
+  'invert',
+  // Additional Extreme Real-World Ball Python Genes (appended to preserve compact v2 save indices)
+  'monsoon',
+  'sunset',
+  'geneticstripe',
+  'tristripe',
+  'leopard',
+  'monarch',
+  'cinnamon',
+  'blade',
 ];
 
 export const LOCUS_DEFINITIONS: Record<LocusId, LocusDefinition> = {
@@ -388,6 +398,101 @@ export const LOCUS_DEFINITIONS: Record<LocusId, LocusDefinition> = {
     tags: ['Pattern', 'Color', 'Custom'],
     isCustom: true,
   },
+  invert: {
+    id: 'invert',
+    name: 'Inverted',
+    mode: 'recessive',
+    shortCode: 'Inv',
+    description: 'Recessive custom chromatic-flip gene that inverts every final scale and eye color when homozygous—turning bright Albinos dark and pale coats obsidian.',
+    visualEffect: 'Full RGB color inversion across any morph combo (1× = Het carrier, 2× = Inverted)',
+    rarityWeight: 2.0,
+    tags: ['Color', 'Custom'],
+    isCustom: true,
+  },
+  // --- Additional Extreme Real-World Ball Python Genes ---
+  monsoon: {
+    id: 'monsoon',
+    name: 'Monsoon',
+    mode: 'recessive',
+    shortCode: 'mon',
+    description: 'Extreme recessive pattern disruptor that shatters alien heads into an intricate mosaic labyrinth of scattered spots and a thin fragmented dorsal thread.',
+    visualEffect: 'Shattered mosaic labyrinth spots & broken dorsal thread',
+    rarityWeight: 3.6,
+    tags: ['Pattern'],
+  },
+  sunset: {
+    id: 'sunset',
+    name: 'Sunset',
+    mode: 'recessive',
+    shortCode: 'sun',
+    description: 'Fiery recessive morph washing the body in burnt-orange and rust gradients with bright orange flank flaming and a dark bubbly dorsal stripe.',
+    visualEffect: 'Burnt-orange rust flanks & dark bubbly dorsal stripe',
+    rarityWeight: 3.6,
+    tags: ['Color', 'Pattern'],
+  },
+  geneticstripe: {
+    id: 'geneticstripe',
+    name: 'Genetic Stripe',
+    mode: 'recessive',
+    shortCode: 'gs',
+    description: 'Classic recessive stripe mutation forming a crisp, continuous golden-tan dorsal stripe bordered by dark margins and smooth, patternless flanks.',
+    visualEffect: 'Continuous golden dorsal stripe & clean flanks',
+    rarityWeight: 3.2,
+    tags: ['Pattern'],
+  },
+  tristripe: {
+    id: 'tristripe',
+    name: 'Tri-Stripe',
+    mode: 'recessive',
+    shortCode: 'tri',
+    description: 'Recessive pattern mutation combining a thick solid dark dorsal stripe with merged lateral alien heads forming two parallel dashed side stripes.',
+    visualEffect: 'Bold triple longitudinal stripes from head to tail',
+    rarityWeight: 3.5,
+    tags: ['Pattern'],
+  },
+  leopard: {
+    id: 'leopard',
+    name: 'Leopard',
+    superName: 'Super Leopard',
+    mode: 'codominant',
+    shortCode: 'Leo',
+    description: 'Codominant pattern shatterer that breaks alien heads into a busy, high-contrast dark rosette and spotted puzzle matrix with strong blushing.',
+    visualEffect: 'Busy dark speckled rosettes & broken puzzle contrast',
+    rarityWeight: 1.8,
+    tags: ['Pattern', 'Dark'],
+  },
+  monarch: {
+    id: 'monarch',
+    name: 'Monarch',
+    mode: 'recessive',
+    shortCode: 'mnr',
+    description: 'Recessive hypomelanistic color and pattern morph pairing bright yellow scales with a clean lilac-chocolate blushed puzzle pattern and spotless flanks.',
+    visualEffect: 'Bright yellow & lilac-chocolate clean puzzle pattern',
+    rarityWeight: 3.5,
+    tags: ['Color', 'Light', 'Pattern'],
+  },
+  cinnamon: {
+    id: 'cinnamon',
+    name: 'Cinnamon',
+    superName: 'Super Cinnamon',
+    mode: 'codominant',
+    shortCode: 'Cin',
+    description: 'Deep mahogany-chocolate codominant gene with wide, melted squiggly alien heads and heavy side blushing. Two copies produce a dark solid Super Cinnamon.',
+    visualEffect: 'Rich mahogany melted rings · Solid dark super',
+    rarityWeight: 1.6,
+    tags: ['Dark', 'Pattern'],
+  },
+  blade: {
+    id: 'blade',
+    name: 'Blade',
+    superName: 'Super Blade',
+    mode: 'codominant',
+    shortCode: 'Bld',
+    description: 'Clean codominant pattern-reducer that streamlines and elongates alien heads into sharp reduced bands and linear dorsal corridors.',
+    visualEffect: 'Streamlined reduced bands & clean linear corridors',
+    rarityWeight: 1.7,
+    tags: ['Pattern'],
+  },
 };
 
 export function getLocusContentFlag(locusId: LocusId): ContentFlag {
@@ -476,6 +581,15 @@ export function createWildTypeGenotype(): Genotype {
     crossbar: [0, 0],
     trackline: [0, 0],
     milksnake: [0, 0],
+    invert: [0, 0],
+    monsoon: [0, 0],
+    sunset: [0, 0],
+    geneticstripe: [0, 0],
+    tristripe: [0, 0],
+    leopard: [0, 0],
+    monarch: [0, 0],
+    cinnamon: [0, 0],
+    blade: [0, 0],
   };
 }
 
@@ -587,6 +701,14 @@ export function derivePatternRule(genotype: Genotype, polygenicSeed: number): Pa
   const crossbar = countAlleles(genotype.crossbar) >= 1;
   const trackline = countAlleles(genotype.trackline) >= 1;
   const milksnake = countAlleles(genotype.milksnake);
+  const monsoon = countAlleles(genotype.monsoon) === 2;
+  const sunset = countAlleles(genotype.sunset) === 2;
+  const geneticstripe = countAlleles(genotype.geneticstripe) === 2;
+  const tristripe = countAlleles(genotype.tristripe) === 2;
+  const leopard = countAlleles(genotype.leopard);
+  const monarch = countAlleles(genotype.monarch) === 2;
+  const cinnamon = countAlleles(genotype.cinnamon);
+  const blade = countAlleles(genotype.blade);
 
   const spider = countAlleles(genotype.spider) >= 1;
   const pinstripe = countAlleles(genotype.pinstripe) >= 1;
@@ -664,6 +786,38 @@ export function derivePatternRule(genotype: Genotype, polygenicSeed: number): Pa
     motif = 'dorsal_stripe';
     weight = pastel > 0 ? 'blushed' : 'broad';
     modifier = r2 < 0.5 ? 'banded' : 'flamed';
+  } else if (monsoon) {
+    motif = 'mosaic';
+    weight = 'thin';
+    modifier = 'speckled';
+  } else if (tristripe) {
+    motif = 'tri_stripe';
+    weight = 'broad';
+    modifier = 'dotted';
+  } else if (geneticstripe) {
+    motif = 'dorsal_stripe';
+    weight = 'medium';
+    modifier = 'banded';
+  } else if (sunset) {
+    motif = 'dorsal_stripe';
+    weight = 'blushed';
+    modifier = 'flamed';
+  } else if (leopard >= 1) {
+    motif = 'rosettes';
+    weight = leopard === 2 ? 'broad' : 'medium';
+    modifier = 'speckled';
+  } else if (blade >= 1) {
+    motif = 'banded';
+    weight = blade === 2 ? 'thin' : 'medium';
+    modifier = 'banded';
+  } else if (cinnamon >= 1) {
+    motif = cinnamon === 2 ? 'inkblot' : 'keyholes';
+    weight = 'broad';
+    modifier = 'flamed';
+  } else if (monarch) {
+    motif = 'alien_heads';
+    weight = 'blushed';
+    modifier = 'faded';
   } else if (raindrop) {
     // Preserved original teardrop motif -> Custom Raindrop gene
     motif = 'teardrops';
@@ -773,6 +927,9 @@ function buildPatternGlyph(
   if (motif === 'lines' && modifier === 'dotted') return '-o-o-o-';
   if (motif === 'lines') return weight === 'thin' ? '~~-~~-~' : '=~=~=~=';
   if (motif === 'dorsal_stripe') return '===·===·===';
+  if (motif === 'tri_stripe') return '===···===';
+  if (motif === 'mosaic') return '∷·∷·∷·∷';
+  if (motif === 'rosettes') return '❖·❖·❖·❖';
   if (motif === 'keyholes') return '(o)-(o)';
   if (motif === 'banded') return '{ }-={ }';
   if (motif === 'inkblot') return '▓░▓░▓░▓';
@@ -787,7 +944,112 @@ function buildPatternGlyph(
   return '(8)-(8)';
 }
 
-function derivePalette(genotype: Genotype): SnakePalette {
+// --- Layered Hex Color Utilities for Composable Pigment & Melanin Blending ---
+
+function hexToRgb(hex: string): [number, number, number] {
+  const clean = hex.replace('#', '');
+  const full =
+    clean.length === 3
+      ? clean[0] + clean[0] + clean[1] + clean[1] + clean[2] + clean[2]
+      : clean;
+  const num = parseInt(full, 16);
+  if (Number.isNaN(num)) return [180, 150, 110];
+  return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  const ch = (v: number) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+  return `#${ch(r)}${ch(g)}${ch(b)}`.toUpperCase();
+}
+
+function mixHex(hexA: string, hexB: string, t: number): string {
+  const k = clamp(t, 0, 1);
+  const [ar, ag, ab] = hexToRgb(hexA);
+  const [br, bg, bb] = hexToRgb(hexB);
+  return rgbToHex(ar + (br - ar) * k, ag + (bg - ag) * k, ab + (bb - ab) * k);
+}
+
+function desaturateHex(hex: string, amount: number, coolTint = 0): string {
+  const [r, g, b] = hexToRgb(hex);
+  const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+  const k = clamp(amount, 0, 1);
+  const nr = r + (lum - r) * k;
+  const ng = g + (lum - g) * k;
+  const nb = b + (lum - b) * k + coolTint * 12;
+  return rgbToHex(nr, ng, nb);
+}
+
+function invertHex(hex: string): string {
+  const [r, g, b] = hexToRgb(hex);
+  return rgbToHex(255 - r, 255 - g, 255 - b);
+}
+
+function colorDistance(hexA: string, hexB: string): number {
+  const [ar, ag, ab] = hexToRgb(hexA);
+  const [br, bg, bb] = hexToRgb(hexB);
+  return Math.hypot(ar - br, ag - bg, ab - bb);
+}
+
+/**
+ * Unified biological melanin-removal transform ("removes dark eumelanin" rather than "paints white/yellow"):
+ * - Pure dark melanin (low luminance, low chroma: black/espresso ridges, charcoal obsidian, dark mortar)
+ *   lifts cleanly to bright ivory-white (or soft orchid-white for Lavender Albino).
+ * - Non-melanin chromatic pigments (yellow xanthophores, Sunset orange, Water aqua, Lava glow, Banana lilac)
+ *   are preserved and brightened cleanly without hardcoded per-morph branches!
+ */
+function removeMelaninColor(
+  hex: string,
+  opts: { whiteTarget?: string; yellowTarget?: string; isPatternChannel?: boolean } = {}
+): string {
+  const { whiteTarget = '#FFF7EA', yellowTarget = '#F9D65C', isPatternChannel = false } = opts;
+  const [r, g, b] = hexToRgb(hex);
+  const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+  const maxC = Math.max(r, g, b);
+  const minC = Math.min(r, g, b);
+  const chroma = maxC - minC;
+
+  // 1) Pure dark melanin (low luminance + low chroma -> black/espresso/charcoal): removing melanin leaves crisp ivory-white
+  if (lum < 92 && chroma < 62) {
+    const residualTint = lum < 60 && chroma < 35 ? 0 : clamp((chroma - 24) / 50, 0, 0.24);
+    if (residualTint < 0.04) return whiteTarget;
+    const scale = 248 / Math.max(1, maxC);
+    const tinted = rgbToHex(
+      clamp(r * scale * 0.88 + 30, 0, 255),
+      clamp(g * scale * 0.88 + 30, 0, 255),
+      clamp(b * scale * 0.88 + 30, 0, 255)
+    );
+    return mixHex(whiteTarget, tinted, residualTint);
+  }
+
+  // 2) Low-chroma neutral stone/gray (e.g. Cobblestone pavers): lifts to warm sunlit alabaster/ivory
+  if (chroma < 42) {
+    return mixHex(whiteTarget, yellowTarget, isPatternChannel ? 0.08 : 0.22);
+  }
+
+  // 3) Chromatic pigments (Sunset orange, Water aqua, Lava orange, Classic tan, Banana, etc.):
+  //    Lift lightness while preserving the chromatic hue; standard warm tan maps to vivid golden yellow.
+  const liftScale = 250 / Math.max(1, maxC);
+  const lifted = rgbToHex(
+    clamp(r * liftScale * 0.9 + 26, 0, 255),
+    clamp(g * liftScale * 0.86 + 24, 0, 255),
+    clamp(b * liftScale * 0.84 + 22, 0, 255)
+  );
+  // Wild-type tan (#B5894F: r-g=44, b<g) sits near yellow; strong orange/red (r-g > 55) or cool/blue/purple (b >= g*0.85) keep full hue
+  const orangePull = clamp((r - g - 44) / 72, 0, 1);
+  const coolPull = clamp((b - Math.min(r, g) + 8) / 95, 0, 1);
+  const highChromaPull = clamp((chroma - 75) / 100, 0, 1);
+  const hueKeep = clamp(Math.max(orangePull * 0.94, coolPull * 0.92, highChromaPull * 0.88), 0, 0.95);
+  return mixHex(isPatternChannel ? whiteTarget : yellowTarget, lifted, hueKeep);
+}
+
+/**
+ * Composable 4-layer pigment & melanin palette resolver:
+ * 1) Base & pattern hue tones (warm wild-type, dark/light modifiers, elemental hues, tricolor accents)
+ * 2) Hue-shifting color genes (Banana, Pastel, Enchi, Fire blend cleanly onto any base/elemental hue)
+ * 3) Melanin & xanthophore filters (Axanthic, Hypo, Ultramel, Desert Ghost, Albino, Lavender Albino, Leucistic)
+ * 4) Chromatic Inversion (flips every final RGB color regardless of prior layers)
+ */
+function derivePalette(genotype: Genotype, polygenicSeed = 0.5): SnakePalette {
   const bel = isBlueEyedLeucistic(genotype);
   const blackEl = isBlackEyedLeucistic(genotype);
   const ivory = isIvory(genotype);
@@ -824,249 +1086,33 @@ function derivePalette(genotype: Genotype): SnakePalette {
   const crossbar = countAlleles(genotype.crossbar) >= 1;
   const trackline = countAlleles(genotype.trackline) >= 1;
   const milksnake = countAlleles(genotype.milksnake);
+  const invert = countAlleles(genotype.invert) === 2;
+  const monsoon = countAlleles(genotype.monsoon) === 2;
+  const sunset = countAlleles(genotype.sunset) === 2;
+  const geneticstripe = countAlleles(genotype.geneticstripe) === 2;
+  const tristripe = countAlleles(genotype.tristripe) === 2;
+  const leopard = countAlleles(genotype.leopard);
+  const monarch = countAlleles(genotype.monarch) === 2;
+  const cinnamon = countAlleles(genotype.cinnamon);
+  const blade = countAlleles(genotype.blade);
+  const isStrongMelanistic = eightBall || cinnamon === 2;
+  const pigmentVoices: Array<{ hex: string; weight: number }> = [];
+  const addPigmentVoice = (hex: string, weight: number) => {
+    pigmentVoices.push({ hex, weight });
+  };
 
-  // 0. Custom Elemental Fusion Complex: Lava + Water -> Cobblestone (and Obsidian Cobblestone)
-  if (cobblestone) {
-    return {
-      base: obsidianCobble ? '#555A63' : '#858B92',
-      patternPrimary: obsidianCobble ? '#1E2026' : '#31363E',
-      patternSecondary: obsidianCobble ? '#8B94A0' : '#BCC3CB',
-      accentColor: obsidianCobble ? '#434852' : '#6C737C',
-      belly: '#CDD3D9',
-      outline: '#17191E',
-      eyeIris: obsidianCobble ? '#B785F5' : '#D9AA58',
-      eyePupil: '#141210',
-      headBlush: obsidianCobble ? '#6B727D' : '#9FA6AE',
-      isLeucistic: false,
-      isAlbino: false,
-      isPiebald: piebald,
-    };
-  }
-
-  // 0b. Custom Elemental: Lava (obsidian basalt + molten fissures)
-  if (magma >= 1) {
-    return {
-      base: magma === 2 ? '#1E1412' : '#2C1F1C',
-      patternPrimary: magma === 2 ? '#FF5A14' : '#F46A1F',
-      patternSecondary: '#FFD35E',
-      belly: '#4A2B20',
-      outline: '#110B0A',
-      eyeIris: '#FFA02E',
-      eyePupil: '#3D0F06',
-      headBlush: '#FF7D2A',
-      isLeucistic: false,
-      isAlbino: false,
-      isPiebald: piebald,
-    };
-  }
-
-  // 0c. Custom Elemental: Water (cerulean + seafoam wave caustics)
-  if (tidal >= 1) {
-    return {
-      base: tidal === 2 ? '#1E6996' : '#2D85B2',
-      patternPrimary: '#8CE5F4',
-      patternSecondary: '#DDFBFF',
-      belly: '#E3F8FC',
-      outline: '#123A52',
-      eyeIris: '#5FE7FA',
-      eyePupil: '#0A2536',
-      headBlush: '#76D7EB',
-      isLeucistic: false,
-      isAlbino: false,
-      isPiebald: piebald,
-    };
-  }
-
-  // 1. Blue-Eyed Leucistic
-  if (bel) {
-    return {
-      base: albino ? '#FFFDF7' : '#F6F4EE',
-      patternPrimary: '#EAE6DB',
-      patternSecondary: '#FDFCF9',
-      belly: '#FFFFFF',
-      outline: '#C5BFA8',
-      eyeIris: albino || lavenderAlbino ? '#E86A87' : '#65B8E6',
-      eyePupil: albino || lavenderAlbino ? '#9C1D3B' : '#11293B',
-      headBlush: '#FFFFFF',
-      isLeucistic: true,
-      isAlbino: albino || lavenderAlbino,
-      isPiebald: piebald,
-    };
-  }
-
-  // 2. Black-Eyed Leucistic (Super Fire)
-  if (blackEl) {
-    return {
-      base: '#FAF8F0',
-      patternPrimary: '#F7E194',
-      patternSecondary: '#FFFFFF',
-      belly: '#FFFFFF',
-      outline: '#CFC8B4',
-      eyeIris: '#262321',
-      eyePupil: '#0A0908',
-      headBlush: '#FFFDF5',
-      isLeucistic: true,
-      isAlbino: false,
-      isPiebald: piebald,
-      isCalico: calico,
-    };
-  }
-
-  // 3. Ivory (Super Yellow Belly)
-  if (ivory) {
-    return {
-      base: '#F5F0E3',
-      patternPrimary: '#DDD2E6',
-      patternSecondary: '#FFFDF7',
-      belly: '#FFFFFF',
-      outline: '#C2B7A3',
-      eyeIris: '#48403A',
-      eyePupil: '#14110F',
-      headBlush: '#FAF6EC',
-      isLeucistic: true,
-      isAlbino: false,
-      isPiebald: piebald,
-      isCalico: calico,
-    };
-  }
-
-  // 4. 8-Ball (Super Black Pastel) — velvety solid charcoal-black
-  if (eightBall && !albino && !lavenderAlbino) {
-    return {
-      base: '#2A2524',
-      patternPrimary: '#1A1615',
-      patternSecondary: '#443C39',
-      belly: '#635954',
-      outline: '#100D0C',
-      eyeIris: '#4D413B',
-      eyePupil: '#0B0908',
-      headBlush: '#3A3331',
-      isLeucistic: false,
-      isAlbino: false,
-      isPiebald: piebald,
-      isCalico: calico,
-    };
-  }
-
-  // 5. Snow (Albino + Axanthic)
-  if (albino && axanthic) {
-    return {
-      base: '#F7F2E8',
-      patternPrimary: '#E3D5E8',
-      patternSecondary: '#FFFDF8',
-      belly: '#FFFDF9',
-      outline: '#BBA9B8',
-      eyeIris: '#F06A83',
-      eyePupil: '#8E1730',
-      headBlush: '#FBF5FA',
-      isLeucistic: false,
-      isAlbino: true,
-      isPiebald: piebald,
-      isCalico: calico,
-    };
-  }
-
-  // 6. Lavender Albino (distinct tangerine-gold over violet-lavender)
-  if (lavenderAlbino) {
-    return {
-      base: '#F7B44A',
-      patternPrimary: '#D9C2EB',
-      patternSecondary: '#FFE39E',
-      belly: '#FAF4FF',
-      outline: '#B47933',
-      eyeIris: '#F05988',
-      eyePupil: '#7D1032',
-      headBlush: '#EBD9F7',
-      isLeucistic: false,
-      isAlbino: true,
-      isPiebald: piebald,
-      isCalico: calico,
-    };
-  }
-
-  // 7. Classic Albino
-  if (albino) {
-    const brightYellow = pastel >= 1 ? '#FFE76B' : enchi >= 1 ? '#FFBF47' : '#F9D65C';
-    const whiteBand = spider ? '#FFFDF6' : '#FFF4DC';
-    return {
-      base: brightYellow,
-      patternPrimary: whiteBand,
-      patternSecondary: '#F2A341',
-      belly: '#FFF9EC',
-      outline: '#C9892C',
-      eyeIris: '#F25A74',
-      eyePupil: '#8C1028',
-      headBlush: '#FFF0B8',
-      isLeucistic: false,
-      isAlbino: true,
-      isPiebald: piebald,
-      isCalico: calico,
-    };
-  }
-
-  // 8. Ultramel (caramel-amber with plum-burgundy eyes)
-  if (ultramel) {
-    return {
-      base: '#E3A74F',
-      patternPrimary: '#8E5329',
-      patternSecondary: '#F7D79A',
-      belly: '#FAF0DC',
-      outline: '#6B3D1D',
-      eyeIris: '#9B354D',
-      eyePupil: '#4A0F1F',
-      headBlush: '#EAC17D',
-      isLeucistic: false,
-      isAlbino: true,
-      isPiebald: piebald,
-      isCalico: calico,
-    };
-  }
-
-  // 9. Axanthic (monochrome silver & charcoal)
-  if (axanthic) {
-    const silverBase = desertGhost ? '#E5E8EC' : pastel >= 1 ? '#D3D7DC' : '#A9B0B8';
-    const darkSlate = clown || ghi >= 1 ? '#20242A' : '#353A42';
-    return {
-      base: silverBase,
-      patternPrimary: darkSlate,
-      patternSecondary: '#ECEFF2',
-      belly: '#F4F6F8',
-      outline: '#1B1F24',
-      eyeIris: '#8F9AA6',
-      eyePupil: '#111418',
-      headBlush: pastel >= 1 ? '#E1E5EA' : '#969DA6',
-      isLeucistic: false,
-      isAlbino: false,
-      isPiebald: piebald,
-      isCalico: calico,
-    };
-  }
-
-  // 10. Banana / Coral Glow (lilac-lavender & banana-yellow)
-  if (banana >= 1) {
-    return {
-      base: banana === 2 ? '#FFE37A' : '#F4CF67',
-      patternPrimary: banana === 2 ? '#DFBEE8' : '#B997C9',
-      patternSecondary: '#FFF2B8',
-      belly: '#FCF7EA',
-      outline: '#8C7099',
-      eyeIris: '#B5748A',
-      eyePupil: '#361B26',
-      headBlush: '#EBD3F2',
-      isLeucistic: false,
-      isAlbino: false,
-      isPiebald: piebald,
-    };
-  }
-
-  // 11. Standard & combo warm ball python palettes
+  // --- Layer 1: Base Coat & Pattern Tones ---
   let base = '#B5894F';
   let patternPrimary = '#2E2219';
   let patternSecondary = '#D8B376';
+  let accentColor: string | undefined;
   let belly = '#F3EAD8';
   let outline = '#1F1711';
   let eyeIris = '#7C5D3B';
+  let eyePupil = '#120E0B';
   let headBlush = '#947348';
+  let isLeucistic = false;
+  let isAlbino = false;
 
   if (pastel === 2) {
     base = '#F6DB65';
@@ -1083,120 +1129,175 @@ function derivePalette(genotype: Genotype): SnakePalette {
   }
 
   if (fire === 1) {
-    base = pastel >= 1 ? '#F7DA78' : '#D9AE62';
-    patternPrimary = '#4D3B28';
+    base = mixHex(base, pastel >= 1 ? '#F7DA78' : '#D9AE62', 0.78);
+    patternPrimary = mixHex(patternPrimary, '#4D3B28', 0.65);
     patternSecondary = '#FBEAC0';
     headBlush = '#F4DFB0';
   }
 
   if (yellowbelly === 1) {
-    base = pastel >= 1 ? '#F0CE62' : '#CE9F52';
+    base = mixHex(base, pastel >= 1 ? '#F0CE62' : '#CE9F52', 0.72);
     patternSecondary = '#F5D47D';
     belly = '#F9F2DC';
   }
 
   if (enchi === 2) {
-    base = '#EE9E3C';
+    base = mixHex(base, '#EE9E3C', 0.85);
     patternPrimary = '#4E2E17';
     patternSecondary = '#FFE099';
     headBlush = '#FAD07E';
   } else if (enchi === 1) {
-    base = pastel >= 1 ? '#F6C150' : '#DF963F';
+    base = mixHex(base, pastel >= 1 ? '#F6C150' : '#DF963F', 0.8);
     patternPrimary = '#462A16';
     patternSecondary = '#F7CF84';
     headBlush = '#F0C574';
   }
 
   if (cypress >= 1) {
-    base = cypress === 2 ? '#B8A66E' : '#A69460';
+    base = mixHex(base, cypress === 2 ? '#B8A66E' : '#A69460', 0.78);
     patternPrimary = '#362D1F';
     patternSecondary = '#DFD0A2';
   }
 
-  if (blackpastel === 1) {
-    base = pastel >= 1 ? '#9E8568' : '#7C5C42';
+  if (eightBall) {
+    base = '#2A2524';
+    patternPrimary = '#1A1615';
+    patternSecondary = '#443C39';
+    belly = '#635954';
+    outline = '#100D0C';
+    eyeIris = '#4D413B';
+    eyePupil = '#0B0908';
+    headBlush = '#3A3331';
+  } else if (blackpastel === 1) {
+    base = mixHex(base, pastel >= 1 ? '#9E8568' : '#7C5C42', 0.8);
     patternPrimary = '#231914';
     patternSecondary = '#B89B7C';
     headBlush = '#634A37';
   }
 
   if (ghi >= 1) {
-    base = ghi === 2 ? '#594C3F' : '#857154';
+    base = mixHex(base, ghi === 2 ? '#594C3F' : '#857154', 0.82);
     patternPrimary = '#171412';
     patternSecondary = '#C4B18D';
     headBlush = '#4A3E33';
   }
 
   if (lesser === 1) {
-    base = pastel >= 1 ? '#ECCE82' : '#CFA96D';
-    patternPrimary = '#6E5233';
+    base = mixHex(base, pastel >= 1 ? '#ECCE82' : '#CFA96D', 0.8);
+    patternPrimary = mixHex(patternPrimary, '#6E5233', 0.75);
     patternSecondary = '#F3E3BE';
     headBlush = '#E7D1A4';
   } else if (mojave === 1) {
-    base = pastel >= 1 ? '#D9C074' : '#A68E63';
+    base = mixHex(base, pastel >= 1 ? '#D9C074' : '#A68E63', 0.78);
     patternPrimary = '#2A231E';
     patternSecondary = '#E6D6B0';
     headBlush = '#8D7C62';
   }
 
-  if (pinstripe) {
-    base = pastel >= 1 ? '#E8C563' : '#C99E57';
-    patternPrimary = '#3C2A1A';
-    patternSecondary = '#E9CFA0';
+  if (pinstripe && !isStrongMelanistic) {
+    base = mixHex(base, pastel >= 1 ? '#E8C563' : '#C99E57', 0.45);
+    patternPrimary = mixHex(patternPrimary, '#3C2A1A', 0.45);
+    patternSecondary = mixHex(patternSecondary, '#E9CFA0', 0.6);
   }
 
-  if (clown) {
-    base = pastel >= 1 ? '#F2CE6D' : '#D4A154';
-    patternPrimary = '#2C1B12';
-    patternSecondary = '#F2D694';
+  if (clown && !isStrongMelanistic) {
+    base = mixHex(base, pastel >= 1 ? '#F2CE6D' : '#D4A154', 0.58);
+    patternPrimary = mixHex(patternPrimary, '#2C1B12', 0.7);
+    patternSecondary = mixHex(patternSecondary, '#F2D694', 0.65);
     headBlush = '#4A2F1C';
   }
 
-  if (desertGhost) {
-    // Ultra-clean high-contrast cream/gold + crisp dark pattern
-    base = pastel >= 1 ? '#FCE68A' : '#EED898';
-    patternPrimary = '#1C1714';
-    patternSecondary = '#FFF7DC';
-    headBlush = '#F5E7BA';
+  if (cinnamon === 2) {
+    // Super Cinnamon: sleek solid deep mahogany-charcoal
+    base = '#382520';
+    patternPrimary = '#1E1412';
+    patternSecondary = '#5C3D34';
+    belly = '#7A635A';
+    outline = '#120C0A';
+    headBlush = '#4C332C';
+  } else if (cinnamon === 1 && !eightBall) {
+    base = mixHex(base, '#8C593A', 0.72);
+    patternPrimary = '#271712';
+    patternSecondary = '#C9966E';
+    headBlush = '#734B34';
+    addPigmentVoice('#9A5B36', 0.52);
   }
 
-  if (hypo) {
-    // Soft smoky ghost pastel-taupe wash
-    base = '#E2C39C';
-    patternPrimary = '#847468';
-    patternSecondary = '#F4E5CE';
-    outline = '#5E5148';
-    headBlush = '#EBD7BD';
+  // Primarily pattern/shape genes: apply full warm tint when solo, but stay light on melanistic bases!
+  if (leopard >= 1 && !isStrongMelanistic) {
+    base = mixHex(base, leopard === 2 ? '#C49448' : '#CFA054', 0.42);
+    patternPrimary = mixHex(patternPrimary, '#1B1410', 0.65);
+    patternSecondary = mixHex(patternSecondary, '#EBC880', 0.55);
   }
 
-  if (saddler && pastel === 0 && enchi === 0 && mojave === 0 && lesser === 0) {
+  if (blade >= 1 && !isStrongMelanistic) {
+    base = mixHex(base, blade === 2 ? '#DFB564' : '#CCA158', 0.35);
+    patternSecondary = mixHex(patternSecondary, '#F0D599', 0.45);
+  }
+
+  if (geneticstripe && !isStrongMelanistic) {
+    base = mixHex(base, '#D7AB5A', 0.44);
+    patternPrimary = mixHex(patternPrimary, '#2E2016', 0.5);
+    patternSecondary = mixHex(patternSecondary, '#EFE0B8', 0.5);
+    belly = '#FAF6EB';
+  }
+
+  if (tristripe && !isStrongMelanistic) {
+    base = mixHex(base, '#D5A756', 0.42);
+    patternPrimary = mixHex(patternPrimary, '#191411', 0.55);
+    patternSecondary = mixHex(patternSecondary, '#F2D99B', 0.5);
+  }
+
+  if (monsoon && !isStrongMelanistic) {
+    // Clean light tan head & high-contrast warm tan/espresso mosaic
+    base = mixHex(base, '#C9A46B', 0.52);
+    patternPrimary = mixHex(patternPrimary, '#251B14', 0.6);
+    patternSecondary = mixHex(patternSecondary, '#E6CCA0', 0.55);
+    headBlush = '#D9BE8E';
+  }
+
+  if (pastel >= 1) addPigmentVoice(pastel === 2 ? '#F7DD72' : '#E5C662', pastel === 2 ? 0.55 : 0.42);
+  if (enchi >= 1) addPigmentVoice(enchi === 2 ? '#EE9E3C' : '#DF963F', enchi === 2 ? 0.62 : 0.48);
+
+  if (sunset) {
+    // Fiery burnt-orange & rust gradient with bright orange flank flaming (strong pigment influencer)
+    base = mixHex(base, '#D86327', isStrongMelanistic ? 0.58 : 0.86);
+    patternPrimary = mixHex(patternPrimary, '#3B1C11', 0.72);
+    patternSecondary = '#FFA142';
+    belly = '#F8E3CC';
+    outline = '#23100A';
+    headBlush = '#E88542';
+    addPigmentVoice('#E06424', 0.92);
+  }
+
+  if (saddler && !isStrongMelanistic && !sunset && pastel === 0 && enchi === 0 && mojave === 0 && lesser === 0) {
     base = '#C7944C';
     patternPrimary = '#2E1F15';
     patternSecondary = '#E6C282';
   }
-  if (bullring >= 1 && pastel === 0 && mojave === 0 && lesser === 0) {
+  if (bullring >= 1 && !isStrongMelanistic && !sunset && pastel === 0 && mojave === 0 && lesser === 0) {
     base = bullring === 2 ? '#D98C52' : '#C47E4B';
     patternPrimary = '#2D1C14';
     patternSecondary = '#F0BE8A';
   }
-  if (chevron >= 1 && pastel === 0 && enchi === 0) {
+  if (chevron >= 1 && !isStrongMelanistic && !sunset && pastel === 0 && enchi === 0) {
     base = chevron === 2 ? '#E2AF4E' : '#CC9B49';
     patternPrimary = '#2B1F16';
     patternSecondary = '#F2D28B';
   }
-  if (raindrop && pastel === 0) {
-    base = '#94A68D';
-    patternPrimary = '#283229';
-    patternSecondary = '#D4E2CE';
-    headBlush = '#AEBF9F';
+  if (raindrop && !isStrongMelanistic) {
+    base = mixHex(base, '#94A68D', sunset || pastel >= 1 ? 0.48 : 0.82);
+    patternPrimary = mixHex(patternPrimary, '#283229', 0.65);
+    patternSecondary = mixHex(patternSecondary, '#D4E2CE', 0.6);
+    headBlush = mixHex(headBlush, '#AEBF9F', 0.65);
+    addPigmentVoice('#7F9B76', 0.62);
   }
-
-  if (crossbar && pastel === 0 && enchi === 0) {
+  if (crossbar && !isStrongMelanistic && !sunset && pastel === 0 && enchi === 0) {
     base = '#D69F4E';
     patternPrimary = '#352216';
     patternSecondary = '#F4D594';
   }
-  if (trackline && pastel === 0 && pinstripe === false) {
+  if (trackline && !isStrongMelanistic && !sunset && pastel === 0 && !pinstripe) {
     base = '#C9A462';
     patternPrimary = '#302317';
     patternSecondary = '#ECD4A4';
@@ -1205,45 +1306,346 @@ function derivePalette(genotype: Genotype): SnakePalette {
   if (spider) {
     patternSecondary = '#FAF7F0';
     belly = '#FDFBF7';
-    if (
-      pastel === 0 &&
-      enchi === 0 &&
-      lesser === 0 &&
-      mojave === 0 &&
-      ghi === 0 &&
-      blackpastel === 0
-    ) {
-      base = '#C79B58';
-      patternPrimary = '#2D2016';
-    }
   } else if (calico) {
-    // Real Calico displays high-contrast dark alien heads outlined in warm deep gold + bright white lower belly
     belly = '#FDFBF7';
-    if (
-      pastel === 0 &&
-      enchi === 0 &&
-      lesser === 0 &&
-      mojave === 0 &&
-      ghi === 0 &&
-      blackpastel === 0
-    ) {
-      base = '#C9964C';
-      patternPrimary = '#231810';
-      patternSecondary = '#F0CF7E';
-      headBlush = '#A8824B';
-    }
   }
 
-  let accentColor: string | undefined;
-  if (milksnake >= 1) {
-    // Classic tricolor milk snake palette: warm cream/gold base, jet-black rings, vivid scarlet saddles!
+  // Elemental hue layers: precalc fusion (Water x Lava -> Cobblestone / Obsidian Cobblestone) participates
+  // in symmetric pigment blending rather than paving over Cinnamon, 8-Ball, Sunset, Monarch, etc.!
+  const hasElemental = cobblestone || magma >= 1 || tidal >= 1;
+  const hasPriorPigment =
+    pigmentVoices.length > 0 || isStrongMelanistic || blackpastel === 1 || ghi >= 1;
+  const hasPriorChromatic = pigmentVoices.some((v) => v.weight >= 0.6);
+  if (cobblestone) {
+    const stoneBase = obsidianCobble ? '#4C505D' : '#858B92';
+    const stonePrim = obsidianCobble ? '#1C1E26' : '#31363E';
+    const stoneSec = obsidianCobble ? '#8B94A0' : '#BCC3CB';
+    const stoneHead = obsidianCobble ? '#6B727D' : '#9FA6AE';
+    const stoneMix = hasPriorPigment ? (obsidianCobble ? 0.58 : 0.52) : 0.92;
+    base = mixHex(base, stoneBase, stoneMix);
+    patternPrimary = mixHex(patternPrimary, stonePrim, hasPriorPigment ? 0.62 : 0.92);
+    patternSecondary = mixHex(patternSecondary, stoneSec, stoneMix);
+    accentColor = obsidianCobble ? '#434852' : '#6C737C';
+    belly = mixHex(belly, '#CDD3D9', stoneMix);
+    outline = '#17191E';
+    eyeIris = obsidianCobble ? '#B785F5' : '#D9AA58';
+    eyePupil = '#141210';
+    headBlush = mixHex(headBlush, stoneHead, stoneMix);
+    addPigmentVoice(stoneBase, obsidianCobble ? 0.72 : 0.56);
+  } else if (magma >= 1) {
+    const lavaWeight = magma === 2 ? (hasPriorChromatic ? 0.62 : 0.88) : 0.5;
+    base = mixHex(base, magma === 2 ? '#1E1412' : '#2C1F1C', lavaWeight);
+    patternPrimary = mixHex(patternPrimary, magma === 2 ? '#FF5A14' : '#F46A1F', magma === 2 ? 0.9 : 0.58);
+    patternSecondary = mixHex(patternSecondary, '#FFD35E', magma === 2 ? 0.85 : 0.55);
+    belly = mixHex(belly, '#4A2B20', lavaWeight);
+    outline = '#110B0A';
+    eyeIris = '#FFA02E';
+    eyePupil = '#3D0F06';
+    headBlush = mixHex(headBlush, '#FF7D2A', lavaWeight);
+    addPigmentVoice(magma === 2 ? '#FF5A14' : '#E86826', magma === 2 ? 0.86 : 0.52);
+  } else if (tidal >= 1) {
+    const waterWeight = tidal === 2 ? (hasPriorChromatic ? 0.54 : 0.86) : 0.48;
+    const waterBase = tidal === 2 ? '#1E6996' : '#2D85B2';
+    base = mixHex(base, waterBase, waterWeight);
+    patternPrimary = mixHex(patternPrimary, '#8CE5F4', tidal === 2 ? 0.84 : 0.54);
+    patternSecondary = mixHex(patternSecondary, '#DDFBFF', tidal === 2 ? 0.82 : 0.52);
+    belly = mixHex(belly, '#E3F8FC', waterWeight);
+    outline = mixHex(outline, '#123A52', waterWeight);
+    eyeIris = '#5FE7FA';
+    eyePupil = '#0A2536';
+    headBlush = mixHex(headBlush, '#76D7EB', waterWeight);
+    addPigmentVoice(waterBase, tidal === 2 ? 0.92 : 0.55);
+  }
+
+  // Tricolor Milk Band scarlet saddle accent
+  if (milksnake >= 1 && !cobblestone) {
     accentColor = milksnake === 2 ? '#D92F23' : '#C93C2B';
-    if (pastel === 0 && enchi === 0 && mojave === 0 && lesser === 0 && ghi === 0 && blackpastel === 0) {
+    if (!hasElemental && !sunset && !isStrongMelanistic && pastel === 0 && enchi === 0 && mojave === 0 && lesser === 0 && ghi === 0 && blackpastel === 0) {
       base = '#F2E4BE';
       patternPrimary = '#1C1715';
       patternSecondary = '#FCEFD2';
       headBlush = '#261D1A';
     }
+  }
+
+  // --- Layer 2: Hue-Shifting Color Genes (apply across BOTH classic and elemental bases!) ---
+  if (hasElemental) {
+    if (pastel >= 1) {
+      base = mixHex(base, '#F6E17A', pastel === 2 ? 0.36 : 0.24);
+      patternSecondary = mixHex(patternSecondary, '#FFF5C4', 0.45);
+      headBlush = mixHex(headBlush, '#FAF0B8', 0.4);
+    }
+    if (enchi >= 1) {
+      base = mixHex(base, '#E59A3E', enchi === 2 ? 0.34 : 0.22);
+    }
+    if (fire === 1) {
+      base = mixHex(base, '#F2D68A', 0.22);
+      patternSecondary = mixHex(patternSecondary, '#FFF3D4', 0.35);
+    }
+  }
+
+  if (banana >= 1) {
+    const banBase = banana === 2 ? '#FFE37A' : '#F4CF67';
+    const banPrim = banana === 2 ? '#DFBEE8' : '#B997C9';
+    addPigmentVoice(banBase, banana === 2 ? 0.8 : 0.65);
+    if (hasElemental || sunset || isStrongMelanistic || raindrop) {
+      // Blend banana-yellow & lilac-lavender smoothly into Sunset, Water, Lava, 8-Ball, etc.!
+      const mixAmt = banana === 2 ? 0.6 : 0.48;
+      base = mixHex(base, banBase, mixAmt);
+      patternPrimary = mixHex(patternPrimary, banPrim, mixAmt);
+      patternSecondary = mixHex(patternSecondary, '#FFF2B8', 0.52);
+      headBlush = mixHex(headBlush, '#EBD3F2', 0.52);
+      if (accentColor) accentColor = mixHex(accentColor, '#F29BB8', 0.4);
+    } else {
+      base = banBase;
+      patternPrimary = banPrim;
+      patternSecondary = '#FFF2B8';
+      belly = '#FCF7EA';
+      outline = '#8C7099';
+      eyeIris = '#B5748A';
+      eyePupil = '#361B26';
+      headBlush = '#EBD3F2';
+      if (accentColor) accentColor = mixHex(accentColor, '#F27D8F', 0.35);
+    }
+  }
+
+  if (monarch && !albino && !lavenderAlbino) {
+    addPigmentVoice('#8E6F9E', 0.62);
+  }
+
+  // Emergent dual-pigment "mixed paint" mottling: whenever two opposing/distant chromatic pigment voices
+  // combine (e.g. Water + Sunset, Water + Banana, Sunset + Monarch), the blended midpoint sits between
+  // organic swirling patches where each constituent pigment dominates!
+  let mottleColorA: string | undefined;
+  let mottleColorB: string | undefined;
+  let mottleStrength = 0;
+  if (pigmentVoices.length >= 2 && !cobblestone && !axanthic) {
+    let bestDist = 0;
+    let bestA: { hex: string; weight: number } | null = null;
+    let bestB: { hex: string; weight: number } | null = null;
+    for (let i = 0; i < pigmentVoices.length; i++) {
+      for (let j = i + 1; j < pigmentVoices.length; j++) {
+        const d = colorDistance(pigmentVoices[i].hex, pigmentVoices[j].hex);
+        if (d > bestDist) {
+          bestDist = d;
+          bestA = pigmentVoices[i];
+          bestB = pigmentVoices[j];
+        }
+      }
+    }
+    if (bestA && bestB && bestDist >= 105) {
+      mottleColorA = bestA.hex;
+      mottleColorB = bestB.hex;
+      mottleStrength = clamp(((bestDist - 105) / 120) * Math.min(bestA.weight, bestB.weight) * 0.95, 0.28, 0.78);
+    }
+  }
+
+  const preAlbinoBase = base;
+
+  // --- Layer 3: Melanin, Xanthophore & Contrast Biological Filters ---
+  if (axanthic) {
+    // Strips yellow/red xanthophores into cool monochrome silver/charcoal/ice tones
+    if (!hasElemental && banana === 0 && !albino && !lavenderAlbino) {
+      base = desertGhost ? '#E5E8EC' : pastel >= 1 ? '#D3D7DC' : '#A9B0B8';
+      patternPrimary = clown || ghi >= 1 ? '#20242A' : '#353A42';
+      patternSecondary = '#ECEFF2';
+      belly = '#F4F6F8';
+      outline = '#1B1F24';
+      eyeIris = '#8F9AA6';
+      eyePupil = '#111418';
+      headBlush = pastel >= 1 ? '#E1E5EA' : '#969DA6';
+    } else {
+      base = desaturateHex(base, 0.82, 0.35);
+      patternPrimary = desaturateHex(patternPrimary, 0.85, 0.25);
+      patternSecondary = desaturateHex(patternSecondary, 0.85, 0.25);
+      headBlush = desaturateHex(headBlush, 0.82, 0.25);
+      outline = desaturateHex(outline, 0.9, 0.1);
+      eyeIris = desaturateHex(eyeIris, 0.85, 0.2);
+      if (accentColor) accentColor = desaturateHex(accentColor, 0.88, 0.2);
+    }
+  }
+
+  if (hypo && !albino && !lavenderAlbino) {
+    // Hypomelanistic smoky pastel wash over any underlying palette
+    base = mixHex(base, '#E8CBB0', hasElemental ? 0.38 : 0.72);
+    patternPrimary = mixHex(patternPrimary, '#8C7C70', 0.65);
+    patternSecondary = mixHex(patternSecondary, '#F5E8D6', 0.65);
+    outline = mixHex(outline, '#66584E', 0.6);
+    headBlush = mixHex(headBlush, '#EEDBC4', 0.6);
+  }
+
+  if (ultramel && !albino && !lavenderAlbino) {
+    isAlbino = true;
+    base = mixHex(base, '#E3A74F', hasElemental ? 0.45 : 0.82);
+    patternPrimary = mixHex(patternPrimary, '#8E5329', 0.72);
+    patternSecondary = mixHex(patternSecondary, '#F7D79A', 0.65);
+    outline = mixHex(outline, '#6B3D1D', 0.7);
+    eyeIris = '#9B354D';
+    eyePupil = '#4A0F1F';
+    headBlush = mixHex(headBlush, '#EAC17D', 0.65);
+  }
+
+  if (monarch && !albino && !lavenderAlbino) {
+    // Monarch hypomelanistic filter: bright yellow & cream against clean lilac-chocolate puzzle pattern
+    base = mixHex(base, '#F2D674', hasElemental ? 0.45 : 0.82);
+    patternPrimary = mixHex(patternPrimary, '#7B617A', 0.74);
+    patternSecondary = mixHex(patternSecondary, '#FBF0C4', 0.7);
+    outline = mixHex(outline, '#584459', 0.65);
+    headBlush = mixHex(headBlush, '#EFE3F5', 0.7);
+  }
+
+  if (desertGhost && !albino && !lavenderAlbino) {
+    // High-contrast clean brightening without browning
+    base = mixHex(base, '#FFF4C8', hasElemental ? 0.22 : 0.45);
+    patternPrimary = mixHex(patternPrimary, '#171412', hasElemental ? 0.35 : 0.72);
+    patternSecondary = mixHex(patternSecondary, '#FFF9E6', 0.6);
+  }
+
+  if (albino && axanthic) {
+    // Snow (Albino + Axanthic)
+    isAlbino = true;
+    base = hasElemental ? mixHex(desaturateHex(base, 0.85, 0.2), '#F7F2E8', 0.72) : '#F7F2E8';
+    patternPrimary = '#E3D5E8';
+    patternSecondary = '#FFFDF8';
+    belly = '#FFFDF9';
+    outline = '#BBA9B8';
+    eyeIris = '#F06A83';
+    eyePupil = '#8E1730';
+    headBlush = '#FBF5FA';
+    if (accentColor) accentColor = mixHex(desaturateHex(accentColor, 0.75), '#F2DCE8', 0.55);
+  } else if (lavenderAlbino) {
+    // Lavender Albino: removes melanin across ALL channels while tinting amelanistic white toward soft orchid-lavender
+    isAlbino = true;
+    const lavYellow = '#F7B44A';
+    const lavWhite = '#DCC6EE';
+    base = removeMelaninColor(preAlbinoBase, { whiteTarget: '#FBF2FF', yellowTarget: lavYellow });
+    patternPrimary = mixHex(
+      removeMelaninColor(patternPrimary, { whiteTarget: lavWhite, yellowTarget: lavYellow, isPatternChannel: true }),
+      lavWhite,
+      0.55
+    );
+    patternSecondary = removeMelaninColor(patternSecondary, { whiteTarget: '#FFF4E0', yellowTarget: '#FFE39E' });
+    belly = '#FAF4FF';
+    outline = '#B47933';
+    headBlush = mixHex(removeMelaninColor(headBlush, { whiteTarget: '#EBD9F7', yellowTarget: '#FFE39E' }), '#EBD9F7', 0.45);
+    if (accentColor) accentColor = mixHex(removeMelaninColor(accentColor, { whiteTarget: '#F5D6E8', yellowTarget: '#FF9E6B' }), '#F29BB8', 0.4);
+    if (mottleColorA && mottleColorB) {
+      mottleColorA = removeMelaninColor(mottleColorA, { whiteTarget: '#FBF2FF', yellowTarget: lavYellow });
+      mottleColorB = removeMelaninColor(mottleColorB, { whiteTarget: '#FBF2FF', yellowTarget: lavYellow });
+    }
+    eyeIris = '#F05988';
+    eyePupil = '#7D1032';
+  } else if (albino) {
+    // Unified biological melanin-removal Albino: strips dark melanin to crisp ivory-white while preserving
+    // underlying xanthophores & chromatic hues across Classic, Sunset, Water, Lava, Cobblestone, etc.!
+    isAlbino = true;
+    const brightYellow =
+      banana >= 1 ? '#FFF08A' : pastel >= 1 ? '#FFE76B' : enchi >= 1 ? '#FFBF47' : '#F9D65C';
+    const whiteBand = spider || sunset || tidal >= 1 ? '#FFFDF6' : '#FFF5E0';
+    base = removeMelaninColor(preAlbinoBase, { whiteTarget: whiteBand, yellowTarget: brightYellow });
+    patternPrimary = removeMelaninColor(patternPrimary, {
+      whiteTarget: whiteBand,
+      yellowTarget: brightYellow,
+      isPatternChannel: true,
+    });
+    patternSecondary = removeMelaninColor(patternSecondary, {
+      whiteTarget: '#FFFDF6',
+      yellowTarget: '#F4B44E',
+    });
+    belly = '#FFFDF7';
+    outline = mixHex('#C9892C', base, 0.35);
+    headBlush = removeMelaninColor(headBlush, { whiteTarget: '#FFF8E8', yellowTarget: '#FFF0B8' });
+    if (accentColor) {
+      accentColor = removeMelaninColor(accentColor, { whiteTarget: '#FFF2E6', yellowTarget: '#FF845C' });
+    }
+    if (mottleColorA && mottleColorB) {
+      mottleColorA = removeMelaninColor(mottleColorA, { whiteTarget: whiteBand, yellowTarget: brightYellow });
+      mottleColorB = removeMelaninColor(mottleColorB, { whiteTarget: whiteBand, yellowTarget: brightYellow });
+    }
+    eyeIris = '#F25A74';
+    eyePupil = '#8C1028';
+  }
+
+  // Leucistic complexes (pure white coat with signature eyes)
+  if (bel) {
+    isLeucistic = true;
+    isAlbino = albino || lavenderAlbino;
+    base = albino ? '#FFFDF7' : '#F6F4EE';
+    patternPrimary = '#EAE6DB';
+    patternSecondary = '#FDFCF9';
+    belly = '#FFFFFF';
+    outline = '#C5BFA8';
+    eyeIris = albino || lavenderAlbino ? '#E86A87' : '#65B8E6';
+    eyePupil = albino || lavenderAlbino ? '#9C1D3B' : '#11293B';
+    headBlush = '#FFFFFF';
+  } else if (blackEl) {
+    isLeucistic = true;
+    base = '#FAF8F0';
+    patternPrimary = '#F7E194';
+    patternSecondary = '#FFFFFF';
+    belly = '#FFFFFF';
+    outline = '#CFC8B4';
+    eyeIris = '#262321';
+    eyePupil = '#0A0908';
+    headBlush = '#FFFDF5';
+  } else if (ivory) {
+    isLeucistic = true;
+    base = '#F5F0E3';
+    patternPrimary = '#DDD2E6';
+    patternSecondary = '#FFFDF7';
+    belly = '#FFFFFF';
+    outline = '#C2B7A3';
+    eyeIris = '#48403A';
+    eyePupil = '#14110F';
+    headBlush = '#FAF6EC';
+  }
+
+  // Individual polygenic tone/warmth/contrast expression (zero extra save bytes, derived from polygenicSeed)
+  if (!isLeucistic) {
+    const toneShift = (seededFloat(polygenicSeed, 51) - 0.5) * 2; // [-1, 1]
+    const warmShift = (seededFloat(polygenicSeed, 52) - 0.5) * 2; // [-1, 1]
+    const contrastShift = (seededFloat(polygenicSeed, 53) - 0.5) * 2; // [-1, 1]
+
+    if (toneShift > 0) {
+      base = mixHex(base, '#FFF4D8', toneShift * 0.11);
+      patternSecondary = mixHex(patternSecondary, '#FFF8E6', toneShift * 0.1);
+      headBlush = mixHex(headBlush, '#FFF5DC', toneShift * 0.09);
+    } else if (toneShift < 0) {
+      const amt = -toneShift;
+      base = mixHex(base, '#2E2016', amt * 0.1);
+      patternSecondary = mixHex(patternSecondary, '#4A3826', amt * 0.08);
+      headBlush = mixHex(headBlush, '#36271C', amt * 0.08);
+    }
+
+    if (warmShift > 0) {
+      base = mixHex(base, '#F4B64A', warmShift * 0.09);
+      patternSecondary = mixHex(patternSecondary, '#FFD67A', warmShift * 0.08);
+    } else if (warmShift < 0) {
+      const amt = -warmShift;
+      base = mixHex(base, '#8B8F99', amt * 0.08);
+      patternSecondary = mixHex(patternSecondary, '#D0D4DC', amt * 0.07);
+    }
+
+    if (contrastShift > 0) {
+      patternPrimary = mixHex(patternPrimary, '#140F0C', contrastShift * 0.09);
+    } else if (contrastShift < 0) {
+      patternPrimary = mixHex(patternPrimary, '#9E8D7B', -contrastShift * 0.08);
+    }
+  }
+
+  // --- Layer 4: Chromatic Inversion (flips every final RGB color regardless of prior layers) ---
+  if (invert) {
+    base = invertHex(base);
+    patternPrimary = invertHex(patternPrimary);
+    patternSecondary = invertHex(patternSecondary);
+    if (accentColor) accentColor = invertHex(accentColor);
+    belly = invertHex(belly);
+    outline = invertHex(outline);
+    eyeIris = invertHex(eyeIris);
+    eyePupil = invertHex(eyePupil);
+    headBlush = invertHex(headBlush);
+    if (mottleColorA) mottleColorA = invertHex(mottleColorA);
+    if (mottleColorB) mottleColorB = invertHex(mottleColorB);
   }
 
   return {
@@ -1254,12 +1656,16 @@ function derivePalette(genotype: Genotype): SnakePalette {
     belly,
     outline,
     eyeIris,
-    eyePupil: '#120E0B',
+    eyePupil,
     headBlush,
-    isLeucistic: false,
-    isAlbino: false,
+    isLeucistic,
+    isAlbino,
     isPiebald: piebald,
     isCalico: calico,
+    isInverted: invert,
+    ...(mottleColorA && mottleColorB && !isLeucistic
+      ? { mottleColorA, mottleColorB, mottleStrength }
+      : {}),
   };
 }
 
@@ -1314,24 +1720,34 @@ export function deriveSkinPhenotypeSpec(
   const crossbar = countAlleles(genotype.crossbar) >= 1;
   const trackline = countAlleles(genotype.trackline) >= 1;
   const milksnake = countAlleles(genotype.milksnake);
+  const monsoon = countAlleles(genotype.monsoon) === 2;
+  const sunset = countAlleles(genotype.sunset) === 2;
+  const geneticstripe = countAlleles(genotype.geneticstripe) === 2;
+  const tristripe = countAlleles(genotype.tristripe) === 2;
+  const leopard = countAlleles(genotype.leopard);
+  const monarch = countAlleles(genotype.monarch) === 2;
+  const cinnamon = countAlleles(genotype.cinnamon);
+  const blade = countAlleles(genotype.blade);
 
-  // Subtle individual polygenic variation (each snake in a clutch is uniquely organic)
-  const vFreq = (seededFloat(polygenicSeed, 11) - 0.5) * 0.14;
-  const vCov = (seededFloat(polygenicSeed, 12) - 0.5) * 0.04;
-  params.frequency = clamp(1.0 + vFreq, 0.75, 1.3);
-  params.coverage = clamp(0.54 + vCov, 0.48, 0.6);
+  // Individual polygenic expression variance (zero extra save bytes; spans low-to-high expression per snake)
+  const vFreq = (seededFloat(polygenicSeed, 11) - 0.5) * 0.26;
+  const vCov = (seededFloat(polygenicSeed, 12) - 0.5) * 0.1;
+  const vAspect = (seededFloat(polygenicSeed, 13) - 0.5) * 0.22;
+  const vWarp = (seededFloat(polygenicSeed, 14) - 0.5) * 0.16;
+  const vBlush = (seededFloat(polygenicSeed, 15) - 0.5) * 0.26;
+  const vFlame = (seededFloat(polygenicSeed, 16) - 0.5) * 0.26;
+  const vWidthVar = (seededFloat(polygenicSeed, 17) - 0.5) * 0.2;
+  const vSymmetry = (seededFloat(polygenicSeed, 18) - 0.5) * 0.22;
+
+  params.frequency = clamp(1.0 + vFreq, 0.72, 1.34);
+  params.coverage = clamp(0.54 + vCov, 0.45, 0.63);
+  params.aspectRatio = clamp(params.aspectRatio + vAspect, 0.72, 1.35);
+  params.warpStrength = clamp(params.warpStrength + vWarp, 0.04, 0.45);
+  params.blush = clamp(params.blush + vBlush, 0.02, 0.55);
+  params.flankFlame = clamp(params.flankFlame + vFlame, 0.02, 0.55);
+  params.localWidthVariation = clamp(params.localWidthVariation + vWidthVar, 0.25, 0.85);
+  params.symmetry = clamp(params.symmetry + vSymmetry, 0.02, 0.55);
   params.dorsalBias = -0.18; // Subtle Classic dorsal beading + tail stripe
-
-  const hasBioPatternGene =
-    enchi > 0 ||
-    spider > 0 ||
-    pinstripe > 0 ||
-    clown ||
-    mojave === 1 ||
-    lesser === 1 ||
-    blackpastel === 1 ||
-    ghi > 0 ||
-    cypress > 0;
 
   // --- Biological Color & Tone Modifiers (preserve underlying topology while adjusting softness/blush/flames) ---
   if (pastel >= 1) {
@@ -1387,6 +1803,13 @@ export function deriveSkinPhenotypeSpec(
     params.crownNotch = 0.72;
     params.localWidthVariation = 0.72;
     params.regionalCoherence = 0.24;
+    // Gentle organic coordinate warp melts alien-head edges into squiggly puzzle curves
+    contributions.push({
+      field: 'water_caustics',
+      operation: 'warp',
+      strength: 0.24,
+      frequency: 0.72,
+    });
   }
 
   if (ghi >= 1) {
@@ -1402,6 +1825,13 @@ export function deriveSkinPhenotypeSpec(
     params.localWidthVariation = 0.82;
     params.regionalCoherence = 0.15;
     params.speckleAmount = Math.max(params.speckleAmount, 0.28);
+    // Jagged coordinate distortion fragments dark saddles into erratic splatters
+    contributions.push({
+      field: 'magma_fissures',
+      operation: 'warp',
+      strength: ghi === 2 ? 0.36 : 0.26,
+      frequency: 0.85,
+    });
   }
 
   // Mid-band keyholes: Mojave & Lesser
@@ -1429,6 +1859,14 @@ export function deriveSkinPhenotypeSpec(
     params.baseTaper = 0.46;
     params.crownNotch = 0.34;
     params.regionalCoherence = 0.56;
+    // Gentle subtraction carves open bright butterscotch windows in dark bridges
+    contributions.push({
+      field: 'radial_rings',
+      operation: 'subtract',
+      strength: 0.24,
+      frequency: 0.92,
+      params: { style: 0 },
+    });
   }
 
   // Erosion progression: Classic (0.54) -> Enchi (0.38) -> Spider (0.25) -> Pinstripe (0.19)
@@ -1447,6 +1885,13 @@ export function deriveSkinPhenotypeSpec(
     params.crownNotch = enchi === 2 ? 0 : 0.08;
     params.localWidthVariation = enchi === 2 ? 0.22 : 0.3;
     params.regionalCoherence = 0.68;
+    // Subtle transverse pigmentation modulation pulls combos toward clean banded rhythm
+    contributions.push({
+      field: 'transverse_waves',
+      operation: 'modulate',
+      strength: enchi === 2 ? 0.48 : 0.34,
+      frequency: 0.88,
+    });
   }
 
   if (spider >= 1) {
@@ -1461,6 +1906,13 @@ export function deriveSkinPhenotypeSpec(
     params.crownNotch = 0.12;
     params.localWidthVariation = 0.74;
     params.regionalCoherence = 0.22;
+    // Directional coordinate distortion stretches lateral bridges into asymmetric webbing
+    contributions.push({
+      field: 'water_caustics',
+      operation: 'warp',
+      strength: 0.34,
+      frequency: 1.05,
+    });
   }
 
   if (pinstripe >= 1) {
@@ -1476,6 +1928,14 @@ export function deriveSkinPhenotypeSpec(
     params.baseTaper = 0.48;
     params.crownNotch = 0.08;
     params.regionalCoherence = 0.74;
+    // Fine longitudinal tracks fuse onto whatever cellular pattern is underneath
+    contributions.push({
+      field: 'longitudinal_waves',
+      operation: 'smoothUnion',
+      strength: 0.4,
+      frequency: 1.05,
+      params: { trackOffset: 0.24, trackWidth: 0.075, dotted: 0.35 },
+    });
   }
 
   if (cypress >= 1) {
@@ -1491,6 +1951,25 @@ export function deriveSkinPhenotypeSpec(
     params.baseTaper = 0.54;
     params.crownNotch = 0.24;
     params.regionalCoherence = 0.72;
+    // Longitudinal smoothUnion reinforces prominent dorsal corridors while preserving flank keyholes
+    contributions.push({
+      field: 'longitudinal_waves',
+      operation: 'smoothUnion',
+      strength: cypress === 2 ? 0.46 : 0.32,
+      frequency: 0.95,
+      params: { trackOffset: 0.22, trackWidth: 0.1, dotted: 0 },
+    });
+  }
+
+  // Emergent interaction: dark dilators (GHI / Black Pastel) + banded/linear reducers (Enchi / Spider / Pinstripe)
+  // intersect to carve heavy dark saddles into crisp broken islands & segmented bars
+  if ((ghi >= 1 || blackpastel === 1) && (enchi >= 1 || spider >= 1 || pinstripe >= 1)) {
+    contributions.push({
+      field: 'transverse_waves',
+      operation: 'intersection',
+      strength: 0.32,
+      frequency: 0.92,
+    });
   }
 
   if (clown) {
@@ -1505,6 +1984,186 @@ export function deriveSkinPhenotypeSpec(
     params.crownNotch = 0.1;
     params.localWidthVariation = 0.28;
     params.regionalCoherence = 0.75;
+  }
+
+  // --- Additional Extreme Real-World Pattern Modifiers ---
+  if (cinnamon === 2) {
+    // Super Cinnamon: sleek, nearly solid deep mahogany coat
+    params.coverage += 0.34;
+    params.eyeCount = 0;
+    params.eyeStrength = 0;
+    params.edgeSoftness += 0.035;
+    params.widthContrast = 0;
+    params.baseTaper = 0;
+    params.crownNotch = 0;
+  } else if (cinnamon === 1) {
+    // Rich dark melted puzzle alien heads with heavy side blushing
+    params.coverage += 0.14;
+    params.eyeCount = Math.min(params.eyeCount, 1);
+    params.eyeStrength = 0.88;
+    params.warpStrength += 0.18;
+    params.blush += 0.24;
+    params.flankFlame += 0.28;
+    params.widthContrast = 0.48;
+    params.baseTaper = 0.38;
+    params.crownNotch = 0.66;
+    params.localWidthVariation = 0.64;
+    params.regionalCoherence = 0.28;
+    contributions.push({
+      field: 'water_caustics',
+      operation: 'warp',
+      strength: 0.28,
+      frequency: 0.76,
+    });
+  }
+
+  if (leopard >= 1) {
+    // Busy dark speckled rosette/puzzle shatterer
+    params.coverage += leopard === 2 ? 0.18 : 0.1;
+    params.frequency *= leopard === 2 ? 1.4 : 1.26;
+    params.aspectRatio *= 0.78;
+    params.warpStrength += 0.24;
+    params.blush += 0.24;
+    params.speckleAmount = Math.max(params.speckleAmount, leopard === 2 ? 0.26 : 0.16);
+    params.localWidthVariation = 0.76;
+    params.regionalCoherence = 0.2;
+    contributions.push({
+      field: 'shattered_mosaic',
+      operation: 'union',
+      strength: leopard === 2 ? 0.56 : 0.42,
+      frequency: 1.08,
+      params: { mode: 1 },
+    });
+  }
+
+  if (blade >= 1) {
+    // Clean pattern reducer streamlining alien heads into crisp bands & linear dorsal corridors
+    params.coverage -= blade === 2 ? 0.22 : 0.13;
+    params.aspectRatio *= blade === 2 ? 1.58 : 1.3;
+    params.eyeCount = 0;
+    params.eyeStrength = 0;
+    params.crownNotch = 0.06;
+    params.baseTaper = 0.22;
+    params.regionalCoherence = 0.84;
+    contributions.push({
+      field: 'longitudinal_waves',
+      operation: 'subtract',
+      strength: blade === 2 ? 0.5 : 0.3,
+      frequency: 0.9,
+      params: { trackOffset: 0.0, trackWidth: 0.14, dotted: 0 },
+    });
+  }
+
+  if (monarch) {
+    // Clean lilac-chocolate puzzle pattern without eye pixelation
+    params.eyeCount = 0;
+    params.eyeStrength = 0;
+    params.blush += 0.44;
+    params.edgeSoftness += 0.016;
+    params.crownNotch = 0.18;
+    params.warpStrength += 0.18;
+    contributions.push({
+      field: 'water_caustics',
+      operation: 'warp',
+      strength: 0.26,
+      frequency: 0.85,
+    });
+  }
+
+  if (sunset) {
+    // Burnt-orange fiery reduced flanks + dark bubbly dorsal stripe + stretched candle-flame bands
+    params.coverage = clamp(params.coverage - 0.1, 0.34, 0.56);
+    params.aspectRatio = Math.min(params.aspectRatio, 0.74);
+    params.dorsalBias = Math.max(params.dorsalBias, 0.58);
+    params.flankFlame = Math.max(params.flankFlame, 0.92);
+    params.blush += 0.32;
+    params.eyeCount = 0;
+    params.eyeStrength = 0;
+    params.baseTaper = 0.18;
+    params.crownNotch = 0.08;
+    params.warpStrength += 0.28;
+    contributions.push({
+      field: 'water_caustics',
+      operation: 'warp',
+      strength: 0.42,
+      frequency: 0.95,
+    });
+  }
+
+  if (geneticstripe) {
+    // Clean continuous golden dorsal stripe framed by dark margins; blends proportionally with other morphs
+    params.coverage = params.coverage * 0.52 + 0.48 * 0.48;
+    params.eyeCount = 0;
+    params.eyeStrength = 0;
+    params.warpStrength = Math.min(params.warpStrength, 0.16);
+    params.crownNotch = 0;
+    params.baseTaper = 0.2;
+    params.regionalCoherence = 0.88;
+    contributions.push({
+      field: 'stripe_tracks',
+      operation: 'blend',
+      strength: eightBall || cinnamon === 2 ? 0.42 : 0.64,
+      frequency: 1.0,
+      params: { style: 0 },
+    });
+  }
+
+  if (tristripe) {
+    // Thick solid dark central dorsal stripe + two undulating lateral side stripes; lets melanistic/pattern combos breathe
+    params.coverage = params.coverage * 0.52 + 0.46 * 0.48;
+    params.eyeCount = 0;
+    params.eyeStrength = 0;
+    params.warpStrength = Math.min(params.warpStrength, 0.18);
+    params.crownNotch = 0.05;
+    params.regionalCoherence = 0.86;
+    contributions.push({
+      field: 'stripe_tracks',
+      operation: 'blend',
+      strength: eightBall || cinnamon === 2 ? 0.44 : 0.66,
+      frequency: 1.05,
+      params: { style: 1 },
+    });
+  }
+
+  if (monsoon) {
+    // Extreme shattered mosaic labyrinth spots + horizontal coordinate distortion + broken dorsal thread
+    params.coverage = 0.34;
+    params.frequency = 1.75;
+    params.aspectRatio = 0.55;
+    params.warpStrength = 0.72;
+    params.dorsalBias = -0.5;
+    params.symmetry = 0;
+    params.widthContrast = 0.14;
+    params.baseTaper = 0.3;
+    params.crownNotch = 0;
+    params.localWidthVariation = 0.62;
+    params.regionalCoherence = 0.42;
+    params.edgeSoftness = Math.max(params.edgeSoftness, 0.055);
+    params.blush = Math.max(params.blush, 0.42);
+    params.scaleRelief = Math.max(params.scaleRelief, 0.56);
+    // Smooth horizontal coordinate distortion shears vertical alien-head columns apart without tearing
+    contributions.push({
+      field: 'water_caustics',
+      operation: 'warp',
+      strength: 0.68,
+      frequency: 1.35,
+      params: { horizWarp: 1 },
+    });
+    // 90-degree-turned mosaic subtract/union shatters remaining bands into crisp confetti pebble spots
+    contributions.push({
+      field: 'shattered_mosaic',
+      operation: 'subtract',
+      strength: 0.48,
+      frequency: 1.15,
+      params: { mode: 0 },
+    });
+    contributions.push({
+      field: 'shattered_mosaic',
+      operation: 'union',
+      strength: 0.72,
+      frequency: 0.98,
+      params: { mode: 0 },
+    });
   }
 
   // Orthogonal regional pigment suppression (never overrides underlying pattern topology!)
@@ -1537,17 +2196,31 @@ export function deriveSkinPhenotypeSpec(
 
     const calicoPoly = seededFloat(polygenicSeed, 41);
     if (otherVisualCount === 0) {
-      // Solo Calico: subtle pale/frosted lower flank patches & scattered white scales (0.34..0.50)
-      params.calicoRise = 0.34 + calicoPoly * 0.16;
+      // Solo Calico: subtle pale/frosted lower flank patches & scattered white scales (0.26..0.54)
+      params.calicoRise = 0.26 + calicoPoly * 0.28;
     } else {
-      // Mixed-morph Calico combos bring out much stronger high-white scraped patches (0.60..0.92)
-      params.calicoRise = clamp(0.6 + (otherVisualCount - 1) * 0.13 + calicoPoly * 0.14, 0.58, 0.92);
+      // Mixed-morph Calico combos bring out much stronger high-white scraped patches (0.54..0.94)
+      params.calicoRise = clamp(0.54 + (otherVisualCount - 1) * 0.13 + calicoPoly * 0.24, 0.54, 0.94);
     }
     // Calico also subtly enhances contrast & dorsal tail striping
     params.flankFlame = clamp(params.flankFlame + 0.16, 0, 1);
   }
   if (piebald && !bel && !blackEl) {
-    params.piebaldAmount = 0.78;
+    // Authentic low-white (~15%) to high-white (~92%) Piebald expression:
+    // Random base roll from polygenicSeed + real-world genetic high-white pushers & low-white anchors!
+    let pieAmt = 0.22 + seededFloat(polygenicSeed, 42) * 0.6;
+    // High-white pushers (Spider, Pastel, Enchi, Fire, Pinstripe)
+    if (spider >= 1) pieAmt += 0.16;
+    if (pastel >= 1) pieAmt += pastel === 2 ? 0.14 : 0.07;
+    if (enchi >= 1) pieAmt += enchi === 2 ? 0.14 : 0.08;
+    if (fire === 1) pieAmt += 0.07;
+    if (pinstripe >= 1) pieAmt += 0.07;
+    // Low-white dark anchors (Black Pastel / 8-Ball, Cinnamon / Super Cinnamon, GHI, Leopard)
+    if (blackpastel >= 1) pieAmt -= blackpastel === 2 ? 0.22 : 0.14;
+    if (cinnamon >= 1) pieAmt -= cinnamon === 2 ? 0.22 : 0.14;
+    if (ghi >= 1) pieAmt -= 0.1;
+    if (leopard >= 1) pieAmt -= 0.08;
+    params.piebaldAmount = clamp(pieAmt, 0.12, 0.92);
   }
 
   // Leucistic complexes soften internal contrast cleanly
@@ -1558,16 +2231,19 @@ export function deriveSkinPhenotypeSpec(
     params.scaleRelief = 0.28;
   }
 
-  // --- Composable Custom Mathematical Fields ---
+  // --- Composable Custom Mathematical Fields (always interact with the shared cellular field) ---
   if (cobblestone) {
-    params.coverage = obsidianCobble ? 0.64 : 0.56;
-    params.edgeSoftness = 0.025;
-    params.warpStrength = 0.08;
-    params.scaleRelief = 0.2;
+    // Precalc fusion (Water x Lava -> Cobblestone / Obsidian Cobblestone):
+    // Etches crisp running-bond mortar grooves via smoothUnion (NEVER paves over Tri-Stripe, Cinnamon, etc.!)
+    const targetCov = obsidianCobble ? 0.62 : 0.54;
+    params.coverage = params.coverage * 0.5 + targetCov * 0.5;
+    params.edgeSoftness = Math.min(params.edgeSoftness, 0.032);
+    params.warpStrength = Math.min(params.warpStrength, 0.18);
+    params.scaleRelief = 0.22;
     contributions.push({
       field: 'cellular_pavers',
-      operation: 'blend',
-      strength: 0.96,
+      operation: 'smoothUnion',
+      strength: 0.82,
       frequency: obsidianCobble ? 1.15 : 1.0,
     });
   } else {
@@ -1576,18 +2252,25 @@ export function deriveSkinPhenotypeSpec(
       params.warpStrength += 0.25;
       contributions.push({
         field: 'magma_fissures',
-        operation: hasBioPatternGene ? 'smoothUnion' : 'blend',
-        strength: hasBioPatternGene ? 0.72 : 0.94,
+        operation: 'smoothUnion',
+        strength: magma === 2 ? 0.88 : 0.76,
         frequency: magma === 2 ? 1.15 : 1.0,
       });
     }
     if (tidal >= 1) {
       params.coverage = tidal === 2 ? 0.54 : 0.46;
       params.blush += 0.25;
+      // Water ripples & distorts the underlying cellular field via coordinate warp + gentle caustic modulation
       contributions.push({
         field: 'water_caustics',
-        operation: hasBioPatternGene ? 'modulate' : 'blend',
-        strength: hasBioPatternGene ? 0.78 : 0.92,
+        operation: 'warp',
+        strength: tidal === 2 ? 0.82 : 0.66,
+        frequency: tidal === 2 ? 1.18 : 1.0,
+      });
+      contributions.push({
+        field: 'water_caustics',
+        operation: 'modulate',
+        strength: tidal === 2 ? 0.56 : 0.42,
         frequency: tidal === 2 ? 1.18 : 1.0,
       });
     }
@@ -1595,48 +2278,34 @@ export function deriveSkinPhenotypeSpec(
 
   if (milksnake >= 1 && !cobblestone) {
     params.accentBandStrength = milksnake === 2 ? 1.0 : 0.9;
+    params.coverage -= 0.14;
+    params.dorsalBias = Math.min(params.dorsalBias, -0.32);
     params.edgeSoftness = 0.032;
-    // Key Phase 4 & 5 showcase:
-    // - Solo Milk Band -> crisp tricolor transverse bands (blend 0.92)
-    // - Milk Band + any biological pattern gene -> modulates the cellular alien-head network!
-    const isComposed = hasBioPatternGene || magma > 0 || tidal > 0;
-    if (!isComposed) {
-      params.eyeCount = 0;
-      params.eyeStrength = 0;
-      params.warpStrength = 0.1;
-    }
+    // Modulates the cellular network into tricolor cream/black/scarlet rings while letting base genetics show through
     contributions.push({
       field: 'transverse_waves',
-      operation: isComposed ? 'modulate' : 'blend',
-      strength: isComposed ? 0.82 : 0.94,
+      operation: 'modulate',
+      strength: milksnake === 2 ? 0.95 : 0.86,
       frequency: milksnake === 2 ? 1.15 : 0.95,
     });
   }
 
   if (crossbar && !cobblestone) {
-    const isComposed = hasBioPatternGene || milksnake > 0;
-    if (!isComposed) {
-      params.eyeCount = 0;
-      params.warpStrength = 0.06;
-    }
+    // Slices the cellular pattern into crisp cross-body bars via intersection
     contributions.push({
       field: 'transverse_waves',
-      operation: isComposed ? 'modulate' : 'blend',
-      strength: isComposed ? 0.72 : 0.94,
+      operation: 'intersection',
+      strength: 0.74,
       frequency: 1.05,
     });
   }
 
   if (trackline && !cobblestone) {
-    const isComposed = hasBioPatternGene || milksnake > 0;
-    if (!isComposed) {
-      params.eyeCount = 0;
-      params.warpStrength = 0.04;
-    }
+    // Organically fuses dash-dot railway tracks over the spine
     contributions.push({
       field: 'longitudinal_waves',
-      operation: isComposed ? 'smoothUnion' : 'blend',
-      strength: isComposed ? 0.75 : 0.95,
+      operation: 'smoothUnion',
+      strength: 0.78,
       frequency: 1.0,
       params: {
         trackOffset: 0.28,
@@ -1647,53 +2316,67 @@ export function deriveSkinPhenotypeSpec(
   }
 
   if (chevron >= 1 && !cobblestone) {
-    const isComposed = hasBioPatternGene || milksnake > 0;
-    if (!isComposed) {
-      params.eyeCount = 0;
-      params.warpStrength = 0.08;
-    }
+    // Modulates the cellular field into marching arrowhead chevrons
     contributions.push({
       field: 'angled_waves',
-      operation: isComposed ? 'modulate' : 'blend',
-      strength: isComposed ? 0.74 : 0.93,
+      operation: 'modulate',
+      strength: chevron === 2 ? 0.88 : 0.76,
       frequency: chevron === 2 ? 1.15 : 0.95,
       params: { slant: 0.095 },
     });
   }
 
   if (bullring >= 1 && !cobblestone) {
-    const isComposed = hasBioPatternGene || milksnake > 0;
-    if (!isComposed) params.eyeCount = 0;
+    // Stamps bold concentric double-window rings via union
     contributions.push({
       field: 'radial_rings',
-      operation: isComposed ? 'smoothUnion' : 'blend',
-      strength: isComposed ? 0.68 : 0.92,
+      operation: 'union',
+      strength: bullring === 2 ? 0.86 : 0.76,
       frequency: bullring === 2 ? 0.88 : 1.0,
       params: { style: 0 },
     });
   }
 
   if (saddler && !cobblestone) {
-    const isComposed = hasBioPatternGene || milksnake > 0;
-    if (!isComposed) params.eyeCount = 0;
+    // Smoothly fuses twin-dot medallion saddles onto the cellular field
     contributions.push({
       field: 'radial_rings',
-      operation: isComposed ? 'smoothUnion' : 'blend',
-      strength: isComposed ? 0.68 : 0.92,
+      operation: 'smoothUnion',
+      strength: 0.74,
       frequency: 1.0,
       params: { style: 1 },
     });
   }
 
   if (raindrop && !cobblestone) {
-    const isComposed = hasBioPatternGene || milksnake > 0;
-    if (!isComposed) params.eyeCount = 0;
+    // Carves crisp light alternating teardrop beads out of dark dorsal pigment via subtraction
     contributions.push({
       field: 'radial_teardrops',
-      operation: isComposed ? 'smoothUnion' : 'blend',
-      strength: isComposed ? 0.72 : 0.93,
+      operation: 'subtract',
+      strength: 0.72,
       frequency: 1.05,
     });
+  }
+
+  // Post-morph individual expression nudge so even fixed-target morphs (Monsoon, Stripes, Clown, etc.)
+  // exhibit authentic low-to-high polygenic individuality across seeds without changing morph identity
+  if (!bel && !blackEl && !ivory) {
+    const postCov = (seededFloat(polygenicSeed, 54) - 0.5) * 0.06;
+    const postFreq = 1 + (seededFloat(polygenicSeed, 55) - 0.5) * 0.14;
+    const postWarp = (seededFloat(polygenicSeed, 56) - 0.5) * 0.1;
+    const postBlush = (seededFloat(polygenicSeed, 57) - 0.5) * 0.14;
+    const postFlame = (seededFloat(polygenicSeed, 58) - 0.5) * 0.14;
+    params.coverage += postCov;
+    params.frequency *= postFreq;
+    params.warpStrength += postWarp;
+    params.blush += postBlush;
+    params.flankFlame += postFlame;
+
+    for (let i = 0; i < contributions.length; i++) {
+      const c = contributions[i];
+      const delta = (seededFloat(polygenicSeed, 60 + i) - 0.5) * 0.14;
+      c.strength = clamp(c.strength + delta, 0.12, 1.0);
+    }
   }
 
   // Final safe clamps across the continuous phenotype space
@@ -1851,8 +2534,29 @@ export function evaluatePhenotype(genotype: Genotype, polygenicSeed = 0.5): Snak
   const crossbar = countAlleles(genotype.crossbar);
   const trackline = countAlleles(genotype.trackline);
   const milksnake = countAlleles(genotype.milksnake);
+  const invert = countAlleles(genotype.invert);
+  const monsoon = countAlleles(genotype.monsoon);
+  const sunset = countAlleles(genotype.sunset);
+  const geneticstripe = countAlleles(genotype.geneticstripe);
+  const tristripe = countAlleles(genotype.tristripe);
+  const leopard = countAlleles(genotype.leopard);
+  const monarch = countAlleles(genotype.monarch);
+  const cinnamon = countAlleles(genotype.cinnamon);
+  const blade = countAlleles(genotype.blade);
 
-  if (pastel === 2) {
+  // Iconic real-world named combos: Killer Bee (Super Pastel + Spider) & Bumblebee (Pastel + Spider)
+  const isKillerBee = pastel === 2 && spider >= 1;
+  const isBumblebee = pastel === 1 && spider >= 1;
+
+  if (isKillerBee) {
+    visualGenes.push('Killer Bee');
+    addTags('pastel');
+    addTags('spider');
+  } else if (isBumblebee) {
+    visualGenes.push('Bumblebee');
+    addTags('pastel');
+    addTags('spider');
+  } else if (pastel === 2) {
     visualGenes.push('Super Pastel');
     addTags('pastel');
   } else if (pastel === 1) {
@@ -1892,7 +2596,7 @@ export function evaluatePhenotype(genotype: Genotype, polygenicSeed = 0.5): Snak
     addTags('cypress');
   }
 
-  if (spider >= 1) {
+  if (spider >= 1 && !isKillerBee && !isBumblebee) {
     visualGenes.push('Spider');
     addTags('spider');
   }
@@ -2006,6 +2710,59 @@ export function evaluatePhenotype(genotype: Genotype, polygenicSeed = 0.5): Snak
     hetGenes.push('Clown');
   }
 
+  // Additional Extreme Real-World Ball Python Genes
+  if (leopard === 2) {
+    visualGenes.push('Super Leopard');
+    addTags('leopard');
+  } else if (leopard === 1) {
+    visualGenes.push('Leopard');
+    addTags('leopard');
+  }
+  if (cinnamon === 2) {
+    visualGenes.push('Super Cinnamon');
+    addTags('cinnamon');
+  } else if (cinnamon === 1) {
+    visualGenes.push('Cinnamon');
+    addTags('cinnamon');
+  }
+  if (blade === 2) {
+    visualGenes.push('Super Blade');
+    addTags('blade');
+  } else if (blade === 1) {
+    visualGenes.push('Blade');
+    addTags('blade');
+  }
+  if (monsoon === 2) {
+    visualGenes.push('Monsoon');
+    addTags('monsoon');
+  } else if (monsoon === 1) {
+    hetGenes.push('Monsoon');
+  }
+  if (sunset === 2) {
+    visualGenes.push('Sunset');
+    addTags('sunset');
+  } else if (sunset === 1) {
+    hetGenes.push('Sunset');
+  }
+  if (geneticstripe === 2) {
+    visualGenes.push('Genetic Stripe');
+    addTags('geneticstripe');
+  } else if (geneticstripe === 1) {
+    hetGenes.push('Genetic Stripe');
+  }
+  if (tristripe === 2) {
+    visualGenes.push('Tri-Stripe');
+    addTags('tristripe');
+  } else if (tristripe === 1) {
+    hetGenes.push('Tri-Stripe');
+  }
+  if (monarch === 2) {
+    visualGenes.push('Monarch');
+    addTags('monarch');
+  } else if (monarch === 1) {
+    hetGenes.push('Monarch');
+  }
+
   // Custom Morpharium Originals
   if (saddler >= 1) {
     visualGenes.push('Saddler');
@@ -2045,6 +2802,12 @@ export function evaluatePhenotype(genotype: Genotype, polygenicSeed = 0.5): Snak
   } else if (milksnake === 1) {
     visualGenes.push('Milk Band');
     addTags('milksnake');
+  }
+  if (invert === 2) {
+    visualGenes.push('Inverted');
+    addTags('invert');
+  } else if (invert === 1) {
+    hetGenes.push('Inverted');
   }
 
   // Extreme Custom Elemental Fusion: Lava + Water -> Cobblestone!
@@ -2207,7 +2970,7 @@ export function evaluatePhenotype(genotype: Genotype, polygenicSeed = 0.5): Snak
     rarity = 'common';
   }
 
-  const palette = derivePalette(genotype);
+  const palette = derivePalette(genotype, polygenicSeed);
   const patternRule = derivePatternRule(genotype, polygenicSeed);
   const skinSpec = deriveSkinPhenotypeSpec(genotype, polygenicSeed);
   const isCustomMorph = tagSet.has('Custom') || patternRule.isCustomPattern;

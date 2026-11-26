@@ -498,6 +498,83 @@ export const SKIN_FIELD_PRIMITIVES: Record<SkinFieldPrimitiveId, SkinField> = {
     },
   },
 
+  shattered_mosaic: {
+    sample(u, v, seed, p) {
+      // 90-degree-rotated organic cellular & labyrinth mosaic field (Monsoon / Leopard)
+      const freq = (p?.frequency ?? 1.0) * 6.5;
+      const mode = p?.mode ?? 0; // 0 = shattered jigsaw/confetti blotches (Monsoon), 1 = bold dark rosettes (Leopard)
+      // Swap axes (90-degree turn) + smooth shear along body u to break vertical alien-head columns
+      const shear = (fbm2D(u * freq * 0.55, v * 2.2, seed + 13.4, 2) - 0.5) * 0.72;
+      const gx = (v * 1.75 + shear) * (freq * 0.24);
+      const gy = u * freq * 1.45;
+
+      const ix = Math.floor(gx);
+      const iy = Math.floor(gy);
+      let d1 = 1e9;
+      let d2 = 1e9;
+      let cellHash = 0.5;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const cx = ix + dx + 0.16 + hash2D(ix + dx, iy + dy, seed + 5.7) * 0.68;
+          const cy = iy + dy + 0.16 + hash2DB(ix + dx, iy + dy, seed + 11.3) * 0.68;
+          const dist = Math.hypot((gx - cx) * 1.08, (gy - cy) * 0.94);
+          if (dist < d1) {
+            d2 = d1;
+            d1 = dist;
+            cellHash = hash2D(ix + dx + 19, iy + dy + 31, seed + 2.3);
+          } else if (dist < d2) {
+            d2 = dist;
+          }
+        }
+      }
+
+      if (mode >= 0.5) {
+        // Leopard: bold dark irregular rosette blotches that shatter classic alien heads cleanly
+        const sizeBias = 0.24 + cellHash * 0.18;
+        const spot = 1 - smoothstep(sizeBias, sizeBias + 0.24, d1);
+        return clamp(spot * 0.94, 0, 1);
+      }
+
+      // Monsoon: organic shattered jigsaw/pebble spots of varied sizes + thin broken bright-edged dorsal thread
+      const pebbleSize = 0.18 + cellHash * 0.22;
+      const fleck = 1 - smoothstep(pebbleSize, pebbleSize + 0.22, d1);
+      const mazeChannel = smoothstep(0.05, 0.22, d2 - d1);
+      const dorsalThread =
+        (1 - smoothstep(0.035, 0.11, Math.abs(v))) *
+        smoothstep(0.32, 0.64, fbm2D(u * 14, 1.3, seed + 31.2, 2));
+      return clamp(Math.max(fleck * (0.5 + 0.5 * mazeChannel), dorsalThread * 0.8), 0, 1);
+    },
+  },
+
+  stripe_tracks: {
+    sample(u, v, seed, p) {
+      // Dedicated linear dorsal/lateral stripe topologies:
+      // style 0 = Genetic Stripe (clean bright dorsal stripe framed by dark margins, smooth flanks)
+      // style 1 = Tri-Stripe (bold dark central dorsal stripe + two continuous undulating lateral stripes)
+      const style = p?.style ?? 0;
+      const wobble = (fbm2D(u * 6.0, 0.7, seed + 8.9, 2) - 0.5) * 0.085;
+      const absV = Math.abs(v + wobble);
+
+      if (style >= 0.5) {
+        // Tri-Stripe: bold continuous dark central stripe + two organic undulating lateral stripes
+        const sideSign = v >= 0 ? 1 : -1;
+        const sideWobble = (fbm2D(u * 8.5, sideSign * 2.3, seed + 19.1, 2) - 0.5) * 0.09;
+        const centerThickness = 0.16 + (fbm2D(u * 7.2, 0.3, seed + 3.7, 2) - 0.5) * 0.05;
+        const centerDark = 1 - smoothstep(centerThickness * 0.72, centerThickness * 1.25, absV);
+        const lateralDist = Math.abs(Math.abs(v + sideWobble) - 0.62);
+        const lateralWidth = 0.11 + (fbm2D(u * 9.5, sideSign * 4.1, seed + 27.4, 2) - 0.5) * 0.05;
+        const lateralStripe = 1 - smoothstep(lateralWidth * 0.62, lateralWidth * 1.35, lateralDist);
+        return clamp(Math.max(centerDark * 0.96, lateralStripe * 0.92), 0, 1);
+      }
+
+      // Genetic Stripe: clean bright golden dorsal center + dark flanking rails + calm patternless outer sides
+      const flankRail = 1 - smoothstep(0.08, 0.2, Math.abs(absV - 0.34));
+      const outerShade = smoothstep(0.45, 0.92, absV) * 0.34;
+      const centerClear = 1 - smoothstep(0.1, 0.22, absV);
+      return clamp(Math.max(flankRail * 0.92, outerShade) * (1 - centerClear * 0.92), 0, 1);
+    },
+  },
+
   custom_map: {
     sample(u, v, _seed, p) {
       const id = p && typeof p.mapHash === 'number' ? String(p.mapHash) : undefined;
@@ -624,8 +701,9 @@ export function evaluateSkinPoint(
             ...(c.params ?? {}),
           });
     const shift = (sampleVal - 0.5) * c.strength;
-    wu += shift * 0.045;
-    wv += shift * 0.28;
+    const horizBoost = c.params?.horizWarp ?? 0;
+    wu += shift * (0.045 + horizBoost * 0.125);
+    wv += shift * (0.28 - horizBoost * 0.12);
   }
 
   // Stage 4: Evaluate base bilateral cellular skeleton + dorsal continuity + composable fields
@@ -691,7 +769,7 @@ export function evaluateSkinPoint(
   let hasCobblestone = false;
 
   // Apply non-warp composable FieldContributions in canonical order:
-  // modulate -> blend -> union/smoothUnion -> intersection -> subtract
+  // modulate -> symmetric blend -> union/smoothUnion -> intersection -> subtract
   const orderedOps: FieldOperation[] = [
     'modulate',
     'blend',
@@ -702,6 +780,38 @@ export function evaluateSkinPoint(
   ];
   for (let opIdx = 0; opIdx < orderedOps.length; opIdx++) {
     const targetOp = orderedOps[opIdx];
+    if (targetOp === 'blend') {
+      // Order-independent symmetric weighted blend: P1 x P2 === P2 x P1 (no gene paves over another!)
+      let blendSum = 0;
+      let weightSum = 0;
+      let maxWeight = 0;
+      for (let i = 0; i < contributions.length; i++) {
+        const c = contributions[i];
+        if (c.operation !== 'blend') continue;
+        const prim = SKIN_FIELD_PRIMITIVES[c.field];
+        const secVal =
+          c.field === 'custom_map'
+            ? sampleGrayscaleMap(customMapId, wu, wv)
+            : prim.sample(wu, wv, seed + i * 5.3, {
+                frequency: c.frequency ?? params.frequency,
+                aspectRatio: c.aspectRatio ?? params.aspectRatio,
+                phase: c.phase ?? 0,
+                ...(c.params ?? {}),
+              });
+        const w = clamp(c.strength, 0, 1);
+        blendSum += secVal * w;
+        weightSum += w;
+        if (w > maxWeight) maxWeight = w;
+        if (c.field === 'cellular_pavers') hasCobblestone = true;
+      }
+      if (weightSum > 0.0001) {
+        const combinedTarget = blendSum / weightSum;
+        const effectiveMix = clamp(maxWeight, 0, 1);
+        rawField = clamp(lerp(rawField, combinedTarget, effectiveMix), 0, 1);
+      }
+      continue;
+    }
+
     for (let i = 0; i < contributions.length; i++) {
       const c = contributions[i];
       if (c.operation !== targetOp) continue;
@@ -722,7 +832,6 @@ export function evaluateSkinPoint(
       }
       if (c.field === 'transverse_waves' && params.accentBandStrength > 0.01) {
         // Tricolor Milk Band: dark border rings surround vivid scarlet saddle centers!
-        // When secVal is high (>0.62) = scarlet saddle; mid-band (0.36..0.62) = black ring border; low (<0.36) = cream interspace
         const scarletCore = smoothstep(0.6, 0.72, secVal);
         accentMask = Math.max(accentMask, scarletCore * params.accentBandStrength);
       }
@@ -825,16 +934,31 @@ export function evaluateSkinPoint(
     suppressionMask = Math.max(suppressionMask, calicoMask);
   }
   if (params.piebaldAmount > 0.01) {
-    const p1Center = 0.3 + seed * 0.12;
-    const p2Center = 0.66 + (1 - seed) * 0.1;
-    const pRadius = 0.075 + params.piebaldAmount * 0.11;
-    const edgeWarp = (fbm2D(u * 14, v * 4, seed + 51.4, 2) - 0.5) * 0.045;
-    const d1 = Math.abs(u + edgeWarp - p1Center);
-    const d2 = Math.abs(u - edgeWarp - p2Center);
-    const pieMask = Math.max(
-      1 - smoothstep(pRadius - 0.015, pRadius + 0.015, d1),
-      1 - smoothstep(pRadius * 0.85 - 0.015, pRadius * 0.85 + 0.015, d2)
-    );
+    // Authentic Piebald spatial variance:
+    // - Head (u < 0.12) ALWAYS stays pigmented ("Normal Head Rule")
+    // - Seed-driven migration field produces 1 to 4 organic saddles/islands in unpredictable locations
+    // - Low-white shows localized bands or flank-rising flashes; medium-white ~50/50 saddles;
+    //   high-white sweeps mostly snow-white with isolated dorsal islands & optional colored tail tip!
+    const pieAmt = clamp(params.piebaldAmount, 0, 0.94);
+    const headGuard = smoothstep(0.11, 0.16, u);
+    const tailHasTip = hash2D(17, 31, seed + 4.2) < 0.68;
+    const tailAnchor = tailHasTip ? smoothstep(0.9, 0.96, u) * 0.34 : 0;
+    const frontLoadBias = hash2D(29, 11, seed + 8.7) < 0.55
+      ? (1 - smoothstep(0.16, 0.52, u)) * 0.16
+      : 0;
+
+    // Seed-varied spatial frequency (low = 1-2 big sweeping wraps, high = 3-4 varied saddles)
+    const patchFreq = 2.0 + hash2D(5, 19, seed + 2.1) * 2.8;
+    const patchPhase = seed * 23.7;
+    const cloudWarp = (fbm2D(u * 9.5, v * 2.8, seed + 51.4, 2) - 0.5) * 0.16;
+    const primaryWave = fbm2D((u + cloudWarp) * patchFreq + patchPhase, v * 0.42 + 1.3, seed + 13.9, 3);
+    // Low-white Pieds can show white rising from flanks/sides; high-white wraps cleanly across spine
+    const flankAssist = (1 - pieAmt) * (Math.abs(v) - 0.38) * 0.16;
+    const whitePotential = clamp(primaryWave + flankAssist - frontLoadBias - tailAnchor, 0, 1);
+
+    // Map pieAmt (0.12..0.92) cleanly to threshold across the fBm distribution (~[0.24..0.76])
+    const whiteThreshold = lerp(0.73, 0.25, pieAmt);
+    const pieMask = smoothstep(whiteThreshold - 0.028, whiteThreshold + 0.028, whitePotential) * headGuard;
     suppressionMask = Math.max(suppressionMask, pieMask);
   }
 
@@ -902,7 +1026,16 @@ export function synthesizeSkinBuffer(
   const cSec = parseHexColor(palette.patternSecondary);
   const cHead = parseHexColor(palette.headBlush);
   const cAccent = parseHexColor(palette.accentColor ?? '#C6382B');
-  const cWhite: RGB = { r: 251, g: 249, b: 244 };
+  const cWhite: RGB = palette.isInverted
+    ? { r: 10, g: 12, b: 16 }
+    : { r: 251, g: 249, b: 244 };
+  const hasMottle =
+    Boolean(palette.mottleColorA && palette.mottleColorB) &&
+    (palette.mottleStrength ?? 0) > 0.01 &&
+    !palette.isLeucistic;
+  const cMottleA = hasMottle ? parseHexColor(palette.mottleColorA!) : cBase;
+  const cMottleB = hasMottle ? parseHexColor(palette.mottleColorB!) : cBase;
+  const mottleStrength = hasMottle ? clamp(palette.mottleStrength ?? 0, 0, 0.85) : 0;
 
   const hasCobblestone = spec.contributions.some((c) => c.field === 'cellular_pavers');
   const isLeucistic = palette.isLeucistic;
@@ -965,34 +1098,46 @@ export function synthesizeSkinBuffer(
       }
 
       // Final coloration stage
+      const bodyFade = smoothstep(0.05, 0.13, u);
       let col: RGB;
       if (isLeucistic) {
         // Pure porcelain / ivory leucistic coat with ultra-subtle pearlescent blush
         col = mixRgb(cBase, cHead, sample.secondaryMask * 0.18);
-      } else if (hasCobblestone) {
-        // Varied granite/slate cobblestones framed by crisp dark mortar grooves
-        const stoneCol =
-          sample.accentMask < 0.33
-            ? cBase
-            : sample.accentMask < 0.66
-              ? cHead
-              : mixRgb(cSec, cAccent, 0.45);
-        col = mixRgb(stoneCol, cPrim, sample.primaryMask);
       } else {
-        // Smooth head-to-body transition (u < 0.11 stays cleaner so headstamp reads clearly)
-        const bodyFade = smoothstep(0.05, 0.13, u);
-        // 1) Base coat + secondary blushing / lower-flank flaming
-        col = mixRgb(cBase, cSec, sample.secondaryMask * 0.68);
+        // 1) Base coat (with emergent dual-pigment "mixed paint" mottling when opposing hues combine)
+        let localBase = cBase;
+        if (hasMottle) {
+          const mWarpU = (fbm2D(u * 3.8, v * 1.6, seed + 71.1, 2) - 0.5) * 0.24;
+          const mWarpV = (fbm2D(u * 4.4, v * 2.1, seed + 83.7, 2) - 0.5) * 0.32;
+          const mField = fbm2D((u + mWarpU) * 5.2, (v + mWarpV) * 2.2, seed + 97.3, 3);
+          const pullA = smoothstep(0.51, 0.72, mField) * mottleStrength;
+          const pullB = (1 - smoothstep(0.28, 0.49, mField)) * mottleStrength;
+          if (pullA > 0.005) localBase = mixRgb(localBase, cMottleA, pullA);
+          if (pullB > 0.005) localBase = mixRgb(localBase, cMottleB, pullB);
+        }
+        // Subtle per-paver stone shading when Cobblestone/Obsidian Cobblestone is active (never paves over other genes!)
+        if (hasCobblestone) {
+          const stoneShade = (sample.accentMask - 0.5) * 0.28;
+          if (stoneShade > 0) {
+            localBase = mixRgb(localBase, cSec, stoneShade);
+          } else {
+            localBase = mixRgb(localBase, cHead, -stoneShade);
+          }
+        }
+        // Secondary blushing / lower-flank flaming
+        col = mixRgb(localBase, cSec, sample.secondaryMask * (hasCobblestone ? 0.38 : 0.68));
         // 2) Third pigment region (e.g. Milk Band vivid scarlet rings)
-        if (sample.accentMask > 0.01) {
+        if (!hasCobblestone && sample.accentMask > 0.01) {
           col = mixRgb(col, cAccent, sample.accentMask * bodyFade);
         }
-        // 3) Primary dark pattern mask
+        // 3) Primary dark pattern mask (carries both cobblestone mortar AND any combined morph patterns!)
         col = mixRgb(col, cPrim, sample.primaryMask * bodyFade);
-        // 4) Regional white suppression (Calico high-white flanks + Piebald bold patches)
-        if (sample.suppressionMask > 0.01) {
-          col = mixRgb(col, cWhite, sample.suppressionMask * bodyFade);
-        }
+      }
+
+      // 4) Regional white suppression (Calico high-white flanks + Piebald bold patches)
+      // Applies uniformly across ALL pattern types including Cobblestone!
+      if (!isLeucistic && sample.suppressionMask > 0.01) {
+        col = mixRgb(col, cWhite, sample.suppressionMask * bodyFade);
       }
 
       // Apply logically separate scale micro-shading & cylindrical dorsal-to-flank shading

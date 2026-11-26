@@ -273,3 +273,60 @@ test('Super Spider ethical guard flags Spider x Spider pairings, picks safe non-
     assert.ok(countAlleles(egg.snake.genotype.spider) <= 1, 'Never hatch homozygous Super Spider');
   }
 });
+
+test('Extreme real-world morphs (Monsoon, Sunset, Genetic Stripe, Tri-Stripe, Leopard, Monarch, Cinnamon, Blade) and Killer Bee resolve cleanly', () => {
+  const monsoon = evaluatePhenotype(makeGenotype({ monsoon: [1, 1] }), 0.24);
+  assert.equal(monsoon.morphName, 'Monsoon');
+  assert.equal(monsoon.isCustomMorph, false);
+  assert.equal(monsoon.patternRule.motif, 'mosaic');
+  assert.ok(monsoon.skinSpec?.contributions.some((c) => c.operation === 'warp' && c.params?.horizWarp === 1));
+  assert.ok(monsoon.skinSpec?.contributions.some((c) => c.field === 'shattered_mosaic' && c.operation === 'subtract'));
+  assert.ok(monsoon.skinSpec?.contributions.some((c) => c.field === 'shattered_mosaic' && c.operation === 'union'));
+
+  const sunset = evaluatePhenotype(makeGenotype({ sunset: [1, 1] }), 0.24);
+  assert.equal(sunset.morphName, 'Sunset');
+  assert.equal(sunset.isCustomMorph, false);
+
+  const gStripe = evaluatePhenotype(makeGenotype({ geneticstripe: [1, 1] }), 0.24);
+  assert.equal(gStripe.morphName, 'Genetic Stripe');
+  assert.equal(gStripe.isCustomMorph, false);
+
+  const triStripe = evaluatePhenotype(makeGenotype({ tristripe: [1, 1] }), 0.24);
+  assert.equal(triStripe.morphName, 'Tri-Stripe');
+  assert.equal(triStripe.patternRule.motif, 'tri_stripe');
+
+  const leopard = evaluatePhenotype(makeGenotype({ leopard: [1, 0] }), 0.24);
+  assert.equal(leopard.morphName, 'Leopard');
+  assert.equal(leopard.patternRule.motif, 'rosettes');
+
+  const monarch = evaluatePhenotype(makeGenotype({ monarch: [1, 1] }), 0.24);
+  assert.equal(monarch.morphName, 'Monarch');
+
+  const superCin = evaluatePhenotype(makeGenotype({ cinnamon: [1, 1] }), 0.24);
+  assert.equal(superCin.morphName, 'Super Cinnamon');
+
+  const superBlade = evaluatePhenotype(makeGenotype({ blade: [1, 1] }), 0.24);
+  assert.equal(superBlade.morphName, 'Super Blade');
+
+  const killerBee = evaluatePhenotype(makeGenotype({ pastel: [1, 1], spider: [1, 0] }), 0.24);
+  assert.equal(killerBee.morphName, 'Killer Bee');
+
+  const bumblebee = evaluatePhenotype(makeGenotype({ pastel: [1, 0], spider: [1, 0] }), 0.24);
+  assert.equal(bumblebee.morphName, 'Bumblebee');
+});
+
+test('Polygenic seed drives wide individual gene expression across pattern and palette without extra save fields', () => {
+  const piedGeno = makeGenotype({ piebald: [1, 1] });
+  const piedVals = [0.05, 0.25, 0.5, 0.75, 0.95].map((seed) => evaluatePhenotype(piedGeno, seed));
+  const whiteAmounts = piedVals.map((p) => p.skinSpec!.params.piebaldAmount);
+  const spread = Math.max(...whiteAmounts) - Math.min(...whiteAmounts);
+  assert.ok(spread > 0.2, `Expected Piebald low-to-high white expression spread > 0.2, got ${spread.toFixed(3)}`);
+
+  const baseColors = new Set(piedVals.map((p) => p.palette.base));
+  assert.ok(baseColors.size >= 4, 'Different polygenic seeds should produce subtly distinct individual base tones');
+
+  // Blue-Eyed Leucistic should stay pure white regardless of seed
+  const belA = evaluatePhenotype(makeGenotype({ lesser: [1, 1] }), 0.11);
+  const belB = evaluatePhenotype(makeGenotype({ lesser: [1, 1] }), 0.89);
+  assert.equal(belA.palette.base, belB.palette.base);
+});
