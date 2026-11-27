@@ -42,7 +42,52 @@ const pendingJobsByKey = new Map<string, PendingJob>();
 const highPriorityQueue: PendingJob[] = [];
 const normalPriorityQueue: PendingJob[] = [];
 let fallbackTimer: number | null = null;
+let idleWorkerTimer: number | null = null;
+const WORKER_IDLE_TIMEOUT_MS = 15_000;
 const syncedWorkerMaps = new Map<string, { width: number; height: number; data: Float32Array }>();
+
+/**
+ * Terminates idle skin Web Workers after inactivity so resting browser tabs release
+ * worker heap memory (~15–30 MB) and respawn transparently on the next lazy card/sheet load.
+ */
+export function terminateIdleSkinWorkers(): void {
+  if (idleWorkerTimer !== null) {
+    globalThis.clearTimeout(idleWorkerTimer);
+    idleWorkerTimer = null;
+  }
+  if (activeJobsById.size > 0 || highPriorityQueue.length > 0 || normalPriorityQueue.length > 0) {
+    return;
+  }
+  for (const slot of workerSlots) {
+    try {
+      slot.worker.terminate();
+    } catch {
+      // Ignore worker termination errors
+    }
+  }
+  workerSlots.length = 0;
+  workerPoolInitialized = false;
+  workersSupported = false;
+}
+
+function scheduleIdleWorkerCleanup(): void {
+  if (idleWorkerTimer !== null) {
+    globalThis.clearTimeout(idleWorkerTimer);
+    idleWorkerTimer = null;
+  }
+  if (
+    workerSlots.length === 0 ||
+    activeJobsById.size > 0 ||
+    highPriorityQueue.length > 0 ||
+    normalPriorityQueue.length > 0
+  ) {
+    return;
+  }
+  idleWorkerTimer = globalThis.setTimeout(() => {
+    idleWorkerTimer = null;
+    terminateIdleSkinWorkers();
+  }, WORKER_IDLE_TIMEOUT_MS) as unknown as number;
+}
 
 /**
  * Syncs a registered custom grayscale UV map into the Web Worker pool (and replays it to any
@@ -154,6 +199,10 @@ function dequeueNextJob(): PendingJob | null {
 
 function pumpWorkerQueue(): void {
   if (workersSupported && workerSlots.length > 0) {
+    if (idleWorkerTimer !== null) {
+      globalThis.clearTimeout(idleWorkerTimer);
+      idleWorkerTimer = null;
+    }
     for (const slot of workerSlots) {
       if (slot.busyJobId !== null) continue;
       const job = dequeueNextJob();
@@ -163,6 +212,7 @@ function pumpWorkerQueue(): void {
       const payload: SkinWorkerRequest = { id: job.id, ...job.request };
       slot.worker.postMessage(payload);
     }
+    scheduleIdleWorkerCleanup();
     return;
   }
 

@@ -1,4 +1,5 @@
 import { resolveSkinSpecForPhenotype } from './genetics';
+import { getScaledSkinDimensions } from './renderSettings';
 import { type CachedSkinEntry, globalSkinCache } from './skinCache';
 import { computeOutlineGeometry } from './spine';
 import type {
@@ -163,20 +164,28 @@ function drawAffineTexturedTriangle(
     invDenom;
 
   // Slight outward clip inflation (~0.65px) prevents subpixel gaps between neighboring triangles
+  // (scalar math inlined to avoid per-triangle closure & array GC churn in hot render loops)
   const cx = (dx0 + dx1 + dx2) / 3;
   const cy = (dy0 + dy1 + dy2) / 3;
   const seamBleed = 0.65;
-  const expand = (px: number, py: number): [number, number] => {
-    const vx = px - cx;
-    const vy = py - cy;
-    const len = Math.hypot(vx, vy);
-    if (len < 1e-4) return [px, py];
-    return [px + (vx / len) * seamBleed, py + (vy / len) * seamBleed];
-  };
 
-  const [p0x, p0y] = expand(dx0, dy0);
-  const [p1x, p1y] = expand(dx1, dy1);
-  const [p2x, p2y] = expand(dx2, dy2);
+  let vx = dx0 - cx;
+  let vy = dy0 - cy;
+  let len = Math.hypot(vx, vy);
+  const p0x = len < 1e-4 ? dx0 : dx0 + (vx / len) * seamBleed;
+  const p0y = len < 1e-4 ? dy0 : dy0 + (vy / len) * seamBleed;
+
+  vx = dx1 - cx;
+  vy = dy1 - cy;
+  len = Math.hypot(vx, vy);
+  const p1x = len < 1e-4 ? dx1 : dx1 + (vx / len) * seamBleed;
+  const p1y = len < 1e-4 ? dy1 : dy1 + (vy / len) * seamBleed;
+
+  vx = dx2 - cx;
+  vy = dy2 - cy;
+  len = Math.hypot(vx, vy);
+  const p2x = len < 1e-4 ? dx2 : dx2 + (vx / len) * seamBleed;
+  const p2y = len < 1e-4 ? dy2 : dy2 + (vy / len) * seamBleed;
 
   ctx.save();
   ctx.beginPath();
@@ -269,6 +278,8 @@ export interface RenderSnakeOptions {
   seedOverride?: number;
   /** Optional pre-synthesized skin buffer (e.g., from Web Worker) to skip synchronous synthesis */
   cachedSkinOverride?: CachedSkinEntry;
+  /** Optional quality scale factor in [0.5, 1.0] for skin texture resolution */
+  skinScale?: number;
 }
 
 /**
@@ -297,6 +308,7 @@ export function renderProceduralSnake(
     skinSpecOverride,
     seedOverride,
     cachedSkinOverride,
+    skinScale = 1,
   } = opts;
 
   const { palette, isUpsideDown } = phenotype;
@@ -304,12 +316,16 @@ export function renderProceduralSnake(
   const spec = skinSpecOverride ?? resolveSkinSpecForPhenotype(phenotype);
   const seed = seedOverride ?? phenotype.patternRule.variationSeed;
 
-  // Resolution scaling: crisp 256×64 for terrarium / large previews, compact 192×48 for mini cards
-  const texW = spine.baseRadius >= 11 ? 256 : 192;
-  const texH = spine.baseRadius >= 11 ? 64 : 48;
+  // Resolution scaling: crisp 256×64 for terrarium / large previews, compact 192×48 for mini cards,
+  // further scaled cleanly by Render Quality preset when set (<1.0)
+  const baseW = spine.baseRadius >= 11 ? 256 : 192;
+  const baseH = spine.baseRadius >= 11 ? 64 : 48;
+  const { width: texW, height: texH } =
+    skinScale < 0.99 ? getScaledSkinDimensions(baseW, baseH, skinScale) : { width: baseW, height: baseH };
   const cachedSkin =
     cachedSkinOverride ??
     globalSkinCache.getOrSynthesize(spec, palette, seed, texW, texH, debugStage);
+  const skinCanvas = globalSkinCache.ensureEntryCanvas(cachedSkin);
 
   ctx.save();
 
@@ -361,9 +377,9 @@ export function renderProceduralSnake(
   }
   ctx.clip();
 
-  if (cachedSkin.canvas) {
+  if (skinCanvas) {
     // Always draw the UV-warped skin first (even on upside-down Spider snakes so dorsal flank margins peek organically!)
-    renderUVWarpedSkinRibbon(ctx, spine, cachedSkin.canvas);
+    renderUVWarpedSkinRibbon(ctx, spine, skinCanvas);
   }
 
   if (isUpsideDown && debugStage === 'final') {
