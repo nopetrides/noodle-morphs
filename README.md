@@ -41,6 +41,15 @@ Created by **nopetrides**.
    npm run build
    ```
 
-## License
+## License & Source Policy
 
-Non-commercial / Open Source.
+**Copyright (c) 2026 nopetrides. All Rights Reserved.**
+
+Morpharium is **source-available** (viewable source, **not** open for public contributions):
+
+- **Allowed — Research & Education (with credit):** You may view, study, build locally, and cite the source code for non-commercial learning, research, or education, provided you clearly credit **nopetrides** and **Morpharium**.
+- **Allowed — Official Modding:** You may create and share original Gene Packs through Morpharium's intended modding channels (Gene Studio / JSON Gene Packs and, when available, the official Steam Workshop).
+- **Not Allowed:** Re-uploading, mirroring, redistributing builds or source, commercial use, or taking credit / removing attribution.
+- **Contributions:** This repository is viewable-source only and is not accepting public pull requests or external code contributions.
+
+See [LICENSE](./LICENSE) for the full terms.

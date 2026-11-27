@@ -1,0 +1,79 @@
+Morpharium Source-Available License
+Copyright (c) 2026 nopetrides. All Rights Reserved.
+
+This repository makes the source code of Morpharium publicly viewable for
+educational transparency and official modding reference. Morpharium is
+SOURCE-AVAILABLE software — it is NOT open-source software and is NOT open
+for public code contributions.
+
+===========================================================================
+1. PERMITTED USES
+===========================================================================
+
+(a) Research and Education (Attribution Required)
+    You may view, download, build locally, study, reference, and cite this
+    source code strictly for non-commercial personal learning, academic
+    research, or educational instruction, PROVIDED THAT:
+    - You give clear, visible credit to "nopetrides" and "Morpharium"
+      (including a link to the official repository or release); and
+    - You do not distribute playable copies, builds, or re-packaged
+      versions of the game.
+
+(b) Modding Through Intended Channels
+    You may inspect the game's gene schemas, pattern primitives, and
+    modding interfaces in order to create and share original Gene Packs
+    (JSON pack files and your own original artwork/grayscale pattern masks)
+    exclusively through Morpharium's intended modding channels (such as the
+    in-game Gene Pack loader / Gene Studio and the official Steam Workshop).
+    You retain rights to your own original mod assets, subject to the terms
+    of the distribution platform (e.g., Steam Subscriber Agreement).
+
+===========================================================================
+2. PROHIBITED USES
+===========================================================================
+
+Without prior express written permission from the copyright holder, you may
+NOT:
+
+(a) Re-upload, Mirror, or Redistribute
+    Re-upload, re-host, mirror, repackage, fork-and-publish, or redistribute
+    Morpharium, its compiled builds, its source code, or its game assets
+    (in whole or in substantial part) on any website, store, launcher,
+    repository host, or platform (including but not limited to Steam,
+    itch.io, GitHub Pages, or mobile app stores).
+
+(b) Take Credit or Remove Attribution
+    Remove, obscure, or alter any copyright notice, license text, or author
+    attribution, or represent Morpharium or any derivative work based on
+    Morpharium as your own creation.
+
+(c) Commercial Use
+    Use the software, its source code, its assets, or any derivative work
+    for commercial purposes, monetization, paid distribution, or paid
+    services.
+
+(d) Unauthorized Derivatives or Clones
+    Publish standalone games, apps, or web clones built from or incorporating
+    substantial portions of this source code or assets.
+
+===========================================================================
+3. NO PUBLIC CONTRIBUTIONS
+===========================================================================
+
+This repository is viewable-source only and is not open for public code
+contributions or unsolicited pull requests. Any unsolicited code, patch, or
+suggestion submitted to the repository or author may be closed without
+review and does not grant the submitter any rights, ownership, or license
+claim over Morpharium.
+
+===========================================================================
+4. DISCLAIMER OF WARRANTY & LIMITATION OF LIABILITY
+===========================================================================
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF,
+OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
