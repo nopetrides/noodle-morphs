@@ -67,6 +67,13 @@ import {
   onModPacksChanged,
 } from './game/modPacks';
 import {
+  getRenderQualityProfile,
+  loadRenderSettings,
+  saveRenderSettings,
+  type RenderSettings,
+} from './game/renderSettings';
+import { globalSkinCache } from './game/skinCache';
+import {
   deleteSaveSlot,
   getLastActiveSlotId,
   getMostRecentSaveSlot,
@@ -212,6 +219,7 @@ export default function App() {
   const [settings, setSettings] = useState<TerrariumSettings>(() =>
     autostartBoot ? autostartBoot.state.settings : { heatLampOn: true, muted: false }
   );
+  const [renderSettings, setRenderSettings] = useState<RenderSettings>(() => loadRenderSettings());
   const [economy, setEconomy] = useState<EconomyState>(() =>
     autostartBoot ? autostartBoot.state.economy : createDefaultEconomyState()
   );
@@ -306,6 +314,12 @@ export default function App() {
   useEffect(() => {
     audioEngine.setMuted(settings.muted);
   }, [settings.muted]);
+
+  useEffect(() => {
+    saveRenderSettings(renderSettings);
+    const profile = getRenderQualityProfile(renderSettings.quality);
+    globalSkinCache.setMaxBytes(profile.cacheBudgetBytes);
+  }, [renderSettings]);
 
   useEffect(() => {
     document.body.dataset.state = phase;
@@ -1481,6 +1495,7 @@ export default function App() {
             modPacksModalOpen
         )}
         mistTriggerCount={mistTriggerCount}
+        renderSettings={renderSettings}
         onSelectSnake={handleSelectSnake}
         onTapSubstrate={() => audioEngine.playSoftClick()}
       />
@@ -1712,10 +1727,12 @@ export default function App() {
         <PauseModal
           activeSlotId={activeSlotId}
           gameConfig={gameConfig}
+          renderSettings={renderSettings}
           hasSaves={hasSaves}
           snakeCount={snakes.length}
           discoveredCount={discoveredCount}
           clutchesHatched={clutchesHatched}
+          onChangeRenderSettings={setRenderSettings}
           onResume={() => setPhase('playing')}
           onOpenSaveModal={() => {
             audioEngine.playSoftClick();

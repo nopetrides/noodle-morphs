@@ -1,5 +1,6 @@
 class CozyAudioEngine {
   private ctx: AudioContext | null = null;
+  private mistNoiseBuffer: AudioBuffer | null = null;
   private muted = false;
 
   setMuted(muted: boolean) {
@@ -23,6 +24,20 @@ class CozyAudioEngine {
     return this.ctx;
   }
 
+  private getMistNoiseBuffer(ctx: AudioContext): AudioBuffer {
+    if (this.mistNoiseBuffer && this.mistNoiseBuffer.sampleRate === ctx.sampleRate) {
+      return this.mistNoiseBuffer;
+    }
+    const bufferSize = Math.floor(ctx.sampleRate * 0.26);
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.45));
+    }
+    this.mistNoiseBuffer = buffer;
+    return buffer;
+  }
+
   playPetChime() {
     const ctx = this.ensureContext();
     if (!ctx) return;
@@ -42,6 +57,10 @@ class CozyAudioEngine {
 
     osc.connect(gain);
     gain.connect(ctx.destination);
+    osc.onended = () => {
+      osc.disconnect();
+      gain.disconnect();
+    };
     osc.start(now);
     osc.stop(now + 0.25);
   }
@@ -50,15 +69,9 @@ class CozyAudioEngine {
     const ctx = this.ensureContext();
     if (!ctx) return;
     const now = ctx.currentTime;
-    const bufferSize = Math.floor(ctx.sampleRate * 0.26);
-    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.45));
-    }
 
     const noise = ctx.createBufferSource();
-    noise.buffer = buffer;
+    noise.buffer = this.getMistNoiseBuffer(ctx);
 
     const filter = ctx.createBiquadFilter();
     filter.type = 'bandpass';
@@ -73,6 +86,11 @@ class CozyAudioEngine {
     noise.connect(filter);
     filter.connect(gain);
     gain.connect(ctx.destination);
+    noise.onended = () => {
+      noise.disconnect();
+      filter.disconnect();
+      gain.disconnect();
+    };
     noise.start(now);
   }
 
@@ -91,6 +109,10 @@ class CozyAudioEngine {
     tapGain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
     tapOsc.connect(tapGain);
     tapGain.connect(ctx.destination);
+    tapOsc.onended = () => {
+      tapOsc.disconnect();
+      tapGain.disconnect();
+    };
     tapOsc.start(now);
     tapOsc.stop(now + 0.08);
 
@@ -112,6 +134,10 @@ class CozyAudioEngine {
 
       osc.connect(gain);
       gain.connect(ctx.destination);
+      osc.onended = () => {
+        osc.disconnect();
+        gain.disconnect();
+      };
       osc.start(start);
       osc.stop(start + 0.45);
     });
@@ -130,6 +156,10 @@ class CozyAudioEngine {
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
     osc.connect(gain);
     gain.connect(ctx.destination);
+    osc.onended = () => {
+      osc.disconnect();
+      gain.disconnect();
+    };
     osc.start(now);
     osc.stop(now + 0.055);
   }

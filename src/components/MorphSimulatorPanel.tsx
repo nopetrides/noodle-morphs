@@ -572,6 +572,9 @@ export function MorphSimulatorPanel({
 
     return () => {
       handle.cancel();
+      // Release large sprite-sheet GPU backing store (~30 MB for 149 snakes) immediately on close/re-render
+      canvas.width = 0;
+      canvas.height = 0;
     };
   }, [sheetModalOpen, sheetStage, sheetIncludeUv, polygenicSeed]);
 

@@ -238,6 +238,9 @@ export function MiniSnakeCanvas({
       disposed = true;
       observer?.disconnect();
       cancelScheduledPaint?.();
+      // Immediately release GPU canvas backing store when card unmounts (prevents VRAM spikes across large drawers)
+      canvas.width = 0;
+      canvas.height = 0;
     };
   }, [effectiveLazy, width, height, phenotype, poseSeed, debugStage, skinSpecOverride, seedOverride]);
 
@@ -327,32 +330,68 @@ export function MiniSnakeCanvas({
     if (!animate || !stepPreview) {
       return () => {
         drawRef.current = null;
+        canvas.width = 0;
+        canvas.height = 0;
       };
     }
 
     let timerId = 0;
+    let rafId = 0;
     let disposed = false;
     let lastTime = performance.now();
+
+    const clearScheduled = () => {
+      if (timerId) {
+        window.clearTimeout(timerId);
+        timerId = 0;
+      }
+      if (rafId) {
+        window.cancelAnimationFrame(rafId);
+        rafId = 0;
+      }
+    };
+
+    const scheduleTick = () => {
+      if (disposed || document.hidden) return;
+      clearScheduled();
+      timerId = window.setTimeout(() => {
+        timerId = 0;
+        if (!disposed && !document.hidden) {
+          rafId = window.requestAnimationFrame(tick);
+        }
+      }, 60);
+    };
+
     const tick = () => {
-      if (disposed) return;
+      rafId = 0;
+      if (disposed || document.hidden) return;
       const now = performance.now();
       const dt = Math.min((now - lastTime) / 1000, 0.05);
       lastTime = now;
       stepPreview!(dt);
       draw();
-      timerId = window.setTimeout(() => {
-        if (!disposed) window.requestAnimationFrame(tick);
-      }, 60);
+      scheduleTick();
     };
 
-    timerId = window.setTimeout(() => {
-      if (!disposed) window.requestAnimationFrame(tick);
-    }, 60);
+    const handleVisibility = () => {
+      if (document.hidden) {
+        clearScheduled();
+      } else {
+        lastTime = performance.now();
+        scheduleTick();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    scheduleTick();
 
     return () => {
       disposed = true;
       drawRef.current = null;
-      window.clearTimeout(timerId);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      clearScheduled();
+      canvas.width = 0;
+      canvas.height = 0;
     };
   }, [effectiveLazy, width, height, animate]);
 

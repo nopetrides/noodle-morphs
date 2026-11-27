@@ -99,9 +99,17 @@ function createCanvasFromPixels(
   return canvas;
 }
 
+function releaseCanvasBackingStore(canvas: HTMLCanvasElement | null): void {
+  if (!canvas) return;
+  // Explicitly zeroing canvas dimensions forces Chromium/WebKit to release GPU VRAM immediately
+  canvas.width = 0;
+  canvas.height = 0;
+}
+
 /**
  * Bounded memory-budget LRU cache for synthesized (u, v) snake skin textures.
- * Ensures thousands of saved snakes require zero resident textures until rendered.
+ * Explicitly disposes GPU backing stores on eviction/clear and supports instant CPU->GPU
+ * rehydration after browser Canvas2D context loss.
  */
 export class BoundedSkinCache {
   private readonly entries = new Map<string, CachedSkinEntry>();
@@ -109,10 +117,47 @@ export class BoundedSkinCache {
   private hits = 0;
   private misses = 0;
   private evictions = 0;
-  readonly maxBytes: number;
+  maxBytes: number;
 
-  constructor(maxBytes = 4 * 1024 * 1024) {
+  constructor(maxBytes = 10 * 1024 * 1024) {
     this.maxBytes = Math.max(64 * 1024, maxBytes);
+  }
+
+  /** Dynamically adjusts the VRAM/RAM budget (e.g. when user changes Render Quality) and evicts excess entries. */
+  setMaxBytes(nextMaxBytes: number): void {
+    this.maxBytes = Math.max(64 * 1024, nextMaxBytes);
+    this.evictIfNeeded();
+  }
+
+  /**
+   * Re-uploads all cached CPU pixel buffers into fresh offscreen canvases after a browser
+   * GPU reset / Canvas2D context loss so snakes never get stuck rendering flat solid base colors.
+   */
+  rehydrateAllCanvases(): number {
+    if (typeof document === 'undefined') return 0;
+    let rebuilt = 0;
+    for (const entry of this.entries.values()) {
+      releaseCanvasBackingStore(entry.canvas);
+      entry.canvas = createCanvasFromPixels(entry.pixels, entry.width, entry.height);
+      if (entry.canvas) rebuilt++;
+    }
+    return rebuilt;
+  }
+
+  /** Ensures a cached entry's GPU canvas backing store is alive, rehydrating from CPU pixels if lost. */
+  ensureEntryCanvas(entry: CachedSkinEntry): HTMLCanvasElement | null {
+    if (typeof document === 'undefined') return null;
+    if (entry.canvas && entry.canvas.width === entry.width && entry.canvas.height === entry.height) {
+      const ctx = entry.canvas.getContext('2d');
+      const lost =
+        ctx && typeof (ctx as CanvasRenderingContext2D & { isContextLost?: () => boolean }).isContextLost === 'function'
+          ? (ctx as CanvasRenderingContext2D & { isContextLost: () => boolean }).isContextLost()
+          : false;
+      if (ctx && !lost) return entry.canvas;
+    }
+    releaseCanvasBackingStore(entry.canvas);
+    entry.canvas = createCanvasFromPixels(entry.pixels, entry.width, entry.height);
+    return entry.canvas;
   }
 
   /** Pure lookup without synthesizing; refreshes LRU recency on hit. */
@@ -196,6 +241,8 @@ export class BoundedSkinCache {
       const oldest = this.entries.get(oldestKey);
       this.entries.delete(oldestKey);
       if (oldest) {
+        releaseCanvasBackingStore(oldest.canvas);
+        oldest.canvas = null;
         this.totalBytes -= oldest.bytes;
         this.evictions++;
       }
@@ -203,6 +250,10 @@ export class BoundedSkinCache {
   }
 
   clear(): void {
+    for (const entry of this.entries.values()) {
+      releaseCanvasBackingStore(entry.canvas);
+      entry.canvas = null;
+    }
     this.entries.clear();
     this.totalBytes = 0;
   }
@@ -219,5 +270,5 @@ export class BoundedSkinCache {
   }
 }
 
-/** Shared runtime LRU cache (~12 MiB budget: holds ~192 high-res 256×64 skins or ~320 mini 192×48 skins) */
-export const globalSkinCache = new BoundedSkinCache(12 * 1024 * 1024);
+/** Shared runtime LRU cache (dynamically tuned by Render Quality; default 10 MiB) */
+export const globalSkinCache = new BoundedSkinCache(10 * 1024 * 1024);
