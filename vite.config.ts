@@ -16,10 +16,10 @@ const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
 function devGeneEditorPlugin(): Plugin {
   return {
-    name: 'morpharium-dev-gene-editor',
+    name: 'noodle-morphs-dev-gene-editor',
     apply: 'serve',
     configureServer(server) {
-      server.middlewares.use('/__morpharium_dev__/git-status', (req, res, next) => {
+      server.middlewares.use('/__noodle_morphs_dev__/git-status', (req, res, next) => {
         if (req.method !== 'GET') return next();
         execFile(
           'git',
@@ -54,7 +54,7 @@ function devGeneEditorPlugin(): Plugin {
         );
       });
 
-      server.middlewares.use('/__morpharium_dev__/builtin-genes', (req, res, next) => {
+      server.middlewares.use('/__noodle_morphs_dev__/builtin-genes', (req, res, next) => {
         if (req.method !== 'POST') return next();
 
         let body = '';

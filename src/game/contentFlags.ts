@@ -6,7 +6,7 @@ export enum ContentFlag {
   None = 0,
   /** Core real-world Ball Python genetics */
   RealMorphs = 1 << 0,
-  /** Fun / Custom Morpharium original genes & elemental fusions */
+  /** Fun / Custom Noodle Morphs original genes & elemental fusions */
   CustomMorphs = 1 << 1,
   /** The Jean Pool missing-gene breeder shop & intro tutorial */
   JeanPool = 1 << 2,

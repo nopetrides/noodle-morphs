@@ -244,7 +244,7 @@ export function DevGeneEditorModal({ onClose, onGenesSaved }: DevGeneEditorModal
     if (!showSaveConfirm) return;
     let cancelled = false;
     setGitStatus({ loading: true, available: false, clean: false, dirtyCount: 0, files: [] });
-    fetch('/__morpharium_dev__/git-status')
+    fetch('/__noodle_morphs_dev__/git-status')
       .then((res) => res.json())
       .then((data: Partial<GitStatusInfo>) => {
         if (cancelled) return;
@@ -523,7 +523,7 @@ export function DevGeneEditorModal({ onClose, onGenesSaved }: DevGeneEditorModal
     setSaving(true);
     setStatusMessage(null);
     try {
-      const response = await fetch('/__morpharium_dev__/builtin-genes', {
+      const response = await fetch('/__noodle_morphs_dev__/builtin-genes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(draftOverrides),
@@ -845,7 +845,7 @@ export function DevGeneEditorModal({ onClose, onGenesSaved }: DevGeneEditorModal
                     {getGeneCategory(selectedLocus) === 'core'
                       ? 'Core Ball Python Gene'
                       : getGeneCategory(selectedLocus) === 'fun_originals'
-                        ? 'Fun · Morpharium Original'
+                        ? 'Fun · Noodle Morphs Original'
                         : `Fun · Elemental Tier ${getElementalTier(selectedLocus) ?? 0}`}
                   </span>
                   {activeOverride && (

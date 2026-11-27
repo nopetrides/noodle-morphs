@@ -1,7 +1,7 @@
-# Morpharium
+# Noodle Morphs
 ### Ball Python Terrarium & Morph Breeding
 
-Morpharium is a relaxing client-side ball python breeding and terrarium game with procedural slithering physics, Mendelian morph genetics, and modular skin patterns.
+Noodle Morphs is a relaxing client-side ball python breeding and terrarium game with procedural slithering physics, Mendelian morph genetics, and modular skin patterns.
 
 Created by **nopetrides**.
 
@@ -45,10 +45,10 @@ Created by **nopetrides**.
 
 **Copyright (c) 2026 nopetrides. All Rights Reserved.**
 
-Morpharium is **source-available** (viewable source, **not** open for public contributions):
+Noodle Morphs is **source-available** (viewable source, **not** open for public contributions):
 
-- **Allowed — Research & Education (with credit):** You may view, study, build locally, and cite the source code for non-commercial learning, research, or education, provided you clearly credit **nopetrides** and **Morpharium**.
-- **Allowed — Official Modding:** You may create and share original Gene Packs through Morpharium's intended modding channels (Gene Studio / JSON Gene Packs and, when available, the official Steam Workshop).
+- **Allowed — Research & Education (with credit):** You may view, study, build locally, and cite the source code for non-commercial learning, research, or education, provided you clearly credit **nopetrides** and **Noodle Morphs**.
+- **Allowed — Official Modding:** You may create and share original Gene Packs through Noodle Morphs's intended modding channels (Gene Studio / JSON Gene Packs and, when available, the official Steam Workshop).
 - **Not Allowed:** Re-uploading, mirroring, redistributing builds or source, commercial use, or taking credit / removing attribution.
 - **Contributions:** This repository is viewable-source only and is not accepting public pull requests or external code contributions.
 

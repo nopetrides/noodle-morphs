@@ -499,7 +499,7 @@ function drawSheetChromeAndPlaceholders(
   ctx.font = '700 24px Georgia, serif';
   ctx.fillStyle = '#F7F1E5';
   ctx.fillText(
-    `Morpharium — ${entries.length}-Snake Morph Reference Sheet`,
+    `Noodle Morphs — ${entries.length}-Snake Morph Reference Sheet`,
     bannerX + 24,
     pad + 24
   );

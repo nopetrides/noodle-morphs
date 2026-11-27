@@ -1,8 +1,8 @@
-# Morpharium Design Principles
+# Noodle Morphs Design Principles
 
 ## Core Design Philosophy
 
-**Morpharium** is a calm, zero-failure ball python vivarium and genetic breeding experience. It prioritizes meaningful morph discovery, gentle experimentation, and long-term lineage progression over dumping its entire 21-gene library on the player at once. The underlying Mendelian genetics, modular skin pattern shader rules, and vigour systems can be rich and authentic without forcing players to study Punnett squares on minute one.
+**Noodle Morphs** is a calm, zero-failure ball python vivarium and genetic breeding experience. It prioritizes meaningful morph discovery, gentle experimentation, and long-term lineage progression over dumping its entire 21-gene library on the player at once. The underlying Mendelian genetics, modular skin pattern shader rules, and vigour systems can be rich and authentic without forcing players to study Punnett squares on minute one.
 
 The objective is to sustain anticipation for the next clutch—wondering whether an egg will finally hatch a visual recessive, a clean Super complex, or an unexpected mutation—rather than exhausting the most exciting morphs in the opening ten minutes.
 
@@ -22,7 +22,7 @@ A calm vivarium with richly interlocking genetics is always preferable to a clut
 
 ## Progressive Disclosure
 
-Systems in **Morpharium** surface naturally as the player's collection matures, teaching through observation inside the terrarium and clutch reveal rather than upfront walls of text:
+Systems in **Noodle Morphs** surface naturally as the player's collection matures, teaching through observation inside the terrarium and clutch reveal rather than upfront walls of text:
 
 1. **Tactile Vivarium & Basic Inheritance:** Meet your founding pair, watch them slither, pet them, and hatch your first 2-egg clutch to see dominant/co-dominant visual traits mix.
 2. **Hidden Recessive Genetics (`Het`):** Notice your founding pair shares a hidden `Het` trait and watch a rare `1 in 16` visual recessive (like *Albino*, *Piebald*, *Clown*, or *Hypo*) emerge from two non-visual parents.
@@ -35,7 +35,7 @@ Progressive disclosure guides newcomers gently without gating experienced breede
 
 ## Preserve Future Discoveries
 
-Morph discoveries are **Morpharium**'s primary reservoir of delight. Handing out legendary complexes in the opening five minutes weakens the thrill of earning them across generations.
+Morph discoveries are **Noodle Morphs**'s primary reservoir of delight. Handing out legendary complexes in the opening five minutes weakens the thrill of earning them across generations.
 
 Key milestone moments spaced naturally across a playthrough include:
 
@@ -54,7 +54,7 @@ The opening pair should immediately demonstrate the charm of Mendelian breeding 
 
 Randomness should give every new vivarium its own personality and story—never a crippled start.
 
-**Morpharium** uses the hardened **Classic 2+1** starter recipe with a subtle inline `reroll` link for returning players:
+**Noodle Morphs** uses the hardened **Classic 2+1** starter recipe with a subtle inline `reroll` link for returning players:
 
 - **Two distinct, healthy visual genes** (one guaranteed **Co-dominant** so a Super morph is always achievable by Gen 2, plus a second distinct healthy visual gene).
 - **No starting handicaps:** Low-vigour neurological traits like `Spider` (80 max vigour, upside-down posture) are excluded from starter rolls so players choose to adopt them intentionally later.
@@ -65,7 +65,7 @@ Randomness should give every new vivarium its own personality and story—never 
 
 ## Meaningful Decisions and Trade-Offs
 
-**Morpharium** avoids linear "always click the cheapest upgrade" optimization by creating genuine tension across choices:
+**Noodle Morphs** avoids linear "always click the cheapest upgrade" optimization by creating genuine tension across choices:
 
 - **Keep vs. Sell:** Selling a newly hatched morph immediately claims the **First Sale of Morph Bonus** to fund new genes or hardware, whereas keeping it preserves a key breeder or rare carrier (backed by prominent **Last-Two Lineage Warnings** so players never sell a vital gene by accident).
 - **Three Competing Investment Pillars:**
@@ -95,7 +95,7 @@ Every screen—from the live procedural terrarium to the card-flip Clutch Reveal
 
 ## Lessons from Inspirational Breeding Games
 
-| Inspiration | Principle Applied in Morpharium |
+| Inspiration | Principle Applied in Noodle Morphs |
 | --- | --- |
 | **Croakoloco / Placid Plastic Duck Simulator** | Relaxing, zero-stress live diorama where watching your creatures move is intrinsically cozy. |
 | **Pocket Frogs** | Gradual expansion of the morph catalog and collection-driven Morphdex satisfaction. |
@@ -108,7 +108,7 @@ Every screen—from the live procedural terrarium to the card-flip Clutch Reveal
 | Starting Configuration | Strength | Trade-Off |
 | --- | --- | --- |
 | **Minimalist (1 visual + Normal)** | Ultra-simple first clutch; huge discovery runway. | Slow initial novelty before first combo. |
-| **Classic 2+1 (Morpharium Default)** | Guarantees 6 undiscovered morphs (8 outcomes), Gen-2 Super potential, healthy vigour, and clean `Het` discovery. | Introduces hidden `Het` inheritance early. |
+| **Classic 2+1 (Noodle Morphs Default)** | Guarantees 6 undiscovered morphs (8 outcomes), Gen-2 Super potential, healthy vigour, and clean `Het` discovery. | Introduces hidden `Het` inheritance early. |
 | **Double-Stacked (2×1 + Shared Het)** | Rich 16-outcome Clutch #1 with rapid First-Sale bonuses. | Front-loads rewards and reduces early urgency to visit The Jean Pool. |
 | **Super-Ready (Shared Codom + 2 Unique)** | Every gene is visible immediately; `25%` Super chance on Clutch #1. | Spends the "First Super" milestone immediately. |
 | **Strict Zero-Overlap (2 Visuals + 2 Different Hets)** | Maximum gene diversity from minute one; deep Gen 2 puzzle. | Only 4 outcomes on Clutch #1; slower early momentum. |
@@ -123,7 +123,7 @@ Starter genetics, valuation multipliers, First-Sale Bonuses, **The Jean Pool** p
 
 ## Playtesting and Evaluation
 
-Balance and UX changes in **Morpharium** should be judged by real session feel rather than theoretical combo math alone:
+Balance and UX changes in **Noodle Morphs** should be judged by real session feel rather than theoretical combo math alone:
 
 - **Time to first new morph discovery** and **time to first visual recessive**.
 - **Time to first sale** (unlocking **The Hiss Depot**) and **time to first Jean Pool adoption**.
@@ -132,7 +132,7 @@ Balance and UX changes in **Morpharium** should be judged by real session feel r
 - **Usefulness of every investment path** (Incubator Dial vs. Display Slots vs. Gene Inheritance Pie vs. Jean Pool).
 - **Reroll frequency** on the Founding Pair modal (ensuring starts feel consistently inviting rather than baiting resets).
 
-## Morpharium Design Pillars
+## Noodle Morphs Design Pillars
 
 1. **Easy to enjoy, rewarding to master.**  
    Watching calm noodles slither and cracking eggs is instantly cozy; mastering `Het` lines, Supers, and vigour rotation deepens the reward.
@@ -154,6 +154,6 @@ Balance and UX changes in **Morpharium** should be judged by real session feel r
 
 ## Guiding Question
 
-Before adding any new morph, shop upgrade, or mechanic to **Morpharium**, ask:
+Before adding any new morph, shop upgrade, or mechanic to **Noodle Morphs**, ask:
 
 > *Does this create a meaningful decision and sustain anticipation for the next clutch, or does it just hand out more content sooner?*

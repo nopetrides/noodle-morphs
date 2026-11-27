@@ -596,7 +596,7 @@ export function MorphSimulatorPanel({
     const canvas = sheetCanvasRef.current;
     if (!canvas || sheetExporting) return;
     setSheetExporting(true);
-    const filename = `morpharium-${totalSheetSnakes}-morphs-seed-${polygenicSeed.toFixed(3)}-${sheetStage}.png`;
+    const filename = `noodle-morphs-${totalSheetSnakes}-morphs-seed-${polygenicSeed.toFixed(3)}-${sheetStage}.png`;
 
     if (typeof canvas.toBlob === 'function') {
       canvas.toBlob((blob) => {
@@ -1493,7 +1493,7 @@ export function MorphSimulatorPanel({
             <div className="flex-1 overflow-auto p-4 bg-[#120F0C]">
               <canvas
                 ref={sheetCanvasRef}
-                aria-label={`${totalSheetSnakes}-snake Morpharium reference sprite sheet showing base wild-type plus ${LOCI_ORDER.length} genes at 1x and 2x`}
+                aria-label={`${totalSheetSnakes}-snake Noodle Morphs reference sprite sheet showing base wild-type plus ${LOCI_ORDER.length} genes at 1x and 2x`}
                 data-testid="sprite-sheet-preview-canvas"
                 className="max-w-full h-auto mx-auto rounded-lg border border-[#D8BC87]/20 block"
               />

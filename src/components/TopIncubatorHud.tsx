@@ -74,7 +74,7 @@ export function TopIncubatorHud({
           {/* Left brand + morph count + currency balance */}
           <div className="pointer-events-auto flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg bg-[#1F1A15]/92 border border-[#D8BC87]/25 shadow-md shadow-black/35 md:order-1 min-w-0">
             <span className="font-display text-sm sm:text-base font-semibold text-[#F5EFE4] whitespace-nowrap">
-              Morpharium
+              Noodle Morphs
             </span>
             <span className="hidden sm:inline text-[#8F806E]" aria-hidden="true">
               ·

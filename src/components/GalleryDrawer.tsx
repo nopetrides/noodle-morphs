@@ -258,7 +258,7 @@ export function GalleryDrawer({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Morpharium Field Guide"
+      aria-label="Noodle Morphs Field Guide"
       data-testid="gallery-drawer"
       className="fixed inset-0 z-30 flex items-center justify-center p-2.5 sm:p-6 bg-[#110D0A]/80"
       onClick={(e) => {

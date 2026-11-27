@@ -397,7 +397,7 @@ export function SaveSlotModal({
                       )}
                     </div>
                     <p className="text-xs text-[#B3A490] leading-relaxed">
-                      All real-world morphs plus Morpharium custom original patterns and elemental
+                      All real-world morphs plus Noodle Morphs custom original patterns and elemental
                       fusions.
                     </p>
                   </button>

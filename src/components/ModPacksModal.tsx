@@ -459,7 +459,7 @@ export function ModPacksModal({ onClose, onPacksChanged }: ModPacksModalProps) {
       name: studioPackName.trim() || 'My Workshop Pack',
       author: studioAuthor.trim() || 'Local Creator',
       version: studioVersion.trim() || '1.0.0',
-      description: `Created in Morpharium Gene Studio (${loci.map((l) => l.name).join(', ')}).`,
+      description: `Created in Noodle Morphs Gene Studio (${loci.map((l) => l.name).join(', ')}).`,
       source: 'local',
       ...(Object.keys(textures).length > 0 ? { textures } : {}),
       loci,
@@ -975,7 +975,7 @@ export function ModPacksModal({ onClose, onPacksChanged }: ModPacksModalProps) {
               >
                 <FileJson className="w-7 h-7 text-[#7AE0D4] mx-auto mb-2" aria-hidden="true" />
                 <p className="text-xs sm:text-sm text-[#EFE5D6] font-medium">
-                  Drop a Morpharium Gene Pack <code>.json</code> file here
+                  Drop a Noodle Morphs Gene Pack <code>.json</code> file here
                 </p>
                 <p className="text-[11px] text-[#9E8F7B] mt-0.5 mb-3">
                   Schema-validated &amp; sandboxed (no JavaScript executed). Imported packs are marked read-only.

@@ -89,7 +89,7 @@ export const LOCI_ORDER: LocusId[] = [
   'desertghost',
   'hypo',
   'ultramel',
-  // Custom Morpharium Originals (appended to preserve compact v2 save indices)
+  // Custom Noodle Morphs Originals (appended to preserve compact v2 save indices)
   'saddler',
   'bullring',
   'chevron',
@@ -334,13 +334,13 @@ export const LOCUS_DEFINITIONS: Record<LocusId, LocusDefinition> = {
     rarityWeight: 3.3,
     tags: ['Color', 'Light'],
   },
-  // --- Custom Morpharium Originals (Not based on real-world ball python morphs) ---
+  // --- Custom Noodle Morphs Originals (Not based on real-world ball python morphs) ---
   saddler: {
     id: 'saddler',
     name: 'Saddler',
     mode: 'dominant',
     shortCode: 'Sad',
-    description: 'Custom Morpharium pattern: stamps symmetrical twin-dot medallion ovals neatly down the spine.',
+    description: 'Custom Noodle Morphs pattern: stamps symmetrical twin-dot medallion ovals neatly down the spine.',
     visualEffect: 'Custom geometric twin-dot saddles',
     rarityWeight: 1.4,
     tags: ['Pattern', 'Custom'],
@@ -352,7 +352,7 @@ export const LOCUS_DEFINITIONS: Record<LocusId, LocusDefinition> = {
     superName: 'Super Bullring',
     mode: 'codominant',
     shortCode: 'Blr',
-    description: 'Custom Morpharium pattern: turns markings into bold double-window concentric dorsal rings.',
+    description: 'Custom Noodle Morphs pattern: turns markings into bold double-window concentric dorsal rings.',
     visualEffect: 'Custom concentric double-window rings',
     rarityWeight: 1.6,
     tags: ['Pattern', 'Custom'],
@@ -364,7 +364,7 @@ export const LOCUS_DEFINITIONS: Record<LocusId, LocusDefinition> = {
     superName: 'Super Chevron',
     mode: 'codominant',
     shortCode: 'Chv',
-    description: 'Custom Morpharium pattern: replaces blotches with crisp marching arrowhead chevrons (>>>->>>).',
+    description: 'Custom Noodle Morphs pattern: replaces blotches with crisp marching arrowhead chevrons (>>>->>>).',
     visualEffect: 'Custom marching arrowhead chevrons',
     rarityWeight: 1.6,
     tags: ['Pattern', 'Custom'],
@@ -375,7 +375,7 @@ export const LOCUS_DEFINITIONS: Record<LocusId, LocusDefinition> = {
     name: 'Raindrop',
     mode: 'recessive',
     shortCode: 'rnd',
-    description: 'Custom Morpharium recessive pattern: threads alternating misty teardrop beads along a delicate spine line.',
+    description: 'Custom Noodle Morphs recessive pattern: threads alternating misty teardrop beads along a delicate spine line.',
     visualEffect: 'Custom alternating spine teardrops',
     rarityWeight: 3.0,
     tags: ['Pattern', 'Custom'],
@@ -410,7 +410,7 @@ export const LOCUS_DEFINITIONS: Record<LocusId, LocusDefinition> = {
     name: 'Crossbar',
     mode: 'dominant',
     shortCode: 'Bar',
-    description: 'Custom Morpharium pattern: lays crisp straight geometric cross-body bars evenly from neck to tail.',
+    description: 'Custom Noodle Morphs pattern: lays crisp straight geometric cross-body bars evenly from neck to tail.',
     visualEffect: 'Custom straight cross-body bars',
     rarityWeight: 1.4,
     tags: ['Pattern', 'Custom'],
@@ -421,7 +421,7 @@ export const LOCUS_DEFINITIONS: Record<LocusId, LocusDefinition> = {
     name: 'Trackline',
     mode: 'dominant',
     shortCode: 'Trk',
-    description: 'Custom Morpharium pattern: stamps clean, uniform geometric dash-dot railway tracks (-o-o-o-) straight down the spine.',
+    description: 'Custom Noodle Morphs pattern: stamps clean, uniform geometric dash-dot railway tracks (-o-o-o-) straight down the spine.',
     visualEffect: 'Custom uniform dash-dot tracks (-o-o-o-)',
     rarityWeight: 1.4,
     tags: ['Pattern', 'Custom'],
@@ -820,7 +820,7 @@ function formatMotifFormulaLabel(motif: PatternMotif): string {
 /**
  * Derives a modular shader/pattern rule from genetic loci + subtle polygenic seed.
  * Wild-type and pure color/tone morphs preserve the iconic Ball Python "alien_heads" puzzle coat,
- * real pattern genes transform it authentically, and Morpharium Custom genes drive preserved/elemental motifs.
+ * real pattern genes transform it authentically, and Noodle Morphs Custom genes drive preserved/elemental motifs.
  */
 export function derivePatternRule(genotype: Genotype, polygenicSeed: number): PatternRule {
   const bel = isBlueEyedLeucistic(genotype);
@@ -3089,7 +3089,7 @@ export function evaluatePhenotype(
   pushSingleLocusName('tristripe', tristripe);
   pushSingleLocusName('monarch', monarch);
 
-  // Custom Morpharium Originals
+  // Custom Noodle Morphs Originals
   pushSingleLocusName('saddler', saddler);
   pushSingleLocusName('bullring', bullring);
   pushSingleLocusName('chevron', chevron);

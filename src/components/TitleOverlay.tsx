@@ -49,10 +49,10 @@ export function TitleOverlay({
       <div className="max-w-lg">
         {/* Custom inline SVG Coiled Botanical Serpent Emblem */}
         <svg
-          viewBox="0 0 340 84"
-          className="w-72 sm:w-80 h-auto mb-5"
+          viewBox="0 0 388 84"
+          className="w-80 sm:w-[22rem] h-auto mb-5"
           role="img"
-          aria-label="Morpharium emblem"
+          aria-label="Noodle Morphs emblem"
         >
           {/* Coiled botanical snake crest */}
           <g transform="translate(42, 42)">
@@ -104,13 +104,13 @@ export function TitleOverlay({
             y="49"
             fill="#F5EFE4"
             fontFamily="Fraunces, Georgia, serif"
-            fontSize="36"
+            fontSize="34"
             fontWeight="600"
             letterSpacing="-0.015em"
           >
-            Morpharium
+            Noodle Morphs
           </text>
-          <line x1="94" y1="60" x2="316" y2="60" stroke="rgba(217, 180, 106, 0.45)" strokeWidth="1" />
+          <line x1="94" y1="60" x2="366" y2="60" stroke="rgba(217, 180, 106, 0.45)" strokeWidth="1" />
           <text
             x="94"
             y="74"

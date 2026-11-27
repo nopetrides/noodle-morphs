@@ -609,7 +609,7 @@ export const SAMPLE_CELESTIAL_PACK: ModGenePack = {
   schemaVersion: 1,
   packId: 'celestial_morphs',
   name: 'Celestial Morphs',
-  author: 'Morpharium Workshop Sample',
+  author: 'Noodle Morphs Workshop Sample',
   version: '1.0.0',
   description:
     'Adds Starlight, Aurora, and the synthesized Nebula morph (using a bundled grayscale UV texture map).',

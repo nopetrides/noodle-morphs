@@ -26,7 +26,7 @@ export type LocusId =
   | 'desertghost'
   | 'hypo'
   | 'ultramel'
-  // Custom Morpharium Originals (appended to end to preserve compact v2 save indices)
+  // Custom Noodle Morphs Originals (appended to end to preserve compact v2 save indices)
   | 'saddler'
   | 'bullring'
   | 'chevron'
@@ -111,7 +111,7 @@ export interface LocusDefinition {
   visualEffect: string;
   rarityWeight: number;
   tags: MorphTag[];
-  /** True for Morpharium-original custom morphs/patterns not based on real-world ball python genes */
+  /** True for Noodle Morphs-original custom morphs/patterns not based on real-world ball python genes */
   isCustom?: boolean;
   /** Content expansion flag gating this locus (defaults to CustomMorphs if isCustom, else RealMorphs) */
   contentFlag?: ContentFlag;
@@ -148,7 +148,7 @@ export type PatternMotif =
   | 'lines'
   | 'webbing'
   | 'inkblot'
-  // Preserved original Morpharium Custom motifs
+  // Preserved original Noodle Morphs Custom motifs
   | 'saddles'
   | 'rings'
   | 'chevrons'
@@ -187,7 +187,7 @@ export interface PatternRule {
   frequency: number;
   /** Deterministic secondary variation seed 0..1 */
   variationSeed: number;
-  /** True when the rendered pattern motif is a Morpharium Custom pattern (not based on real morphs) */
+  /** True when the rendered pattern motif is a Noodle Morphs Custom pattern (not based on real morphs) */
   isCustomPattern: boolean;
 }
 
@@ -322,7 +322,7 @@ export interface SnakePhenotype {
   hetGenes: string[];
   rarity: MorphRarity;
   isUpsideDown: boolean;
-  /** True when this morph expresses any Morpharium Custom gene or pattern */
+  /** True when this morph expresses any Noodle Morphs Custom gene or pattern */
   isCustomMorph: boolean;
   /** Maximum lineage vigour (baseline 100, always clamped >= minimum breed cost) */
   lineageVigor: number;

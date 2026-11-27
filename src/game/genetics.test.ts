@@ -88,7 +88,7 @@ test('Modular pattern rules generate alien_heads for wild-type/color morphs, aut
   assert.equal(derivePatternRule(makeGenotype({ clown: [1, 1] }), 0.4).motif, 'dorsal_stripe');
   assert.equal(derivePatternRule(makeGenotype({ ghi: [1, 0] }), 0.4).motif, 'inkblot');
 
-  // Preserved original motifs live under Custom-tagged Morpharium genes
+  // Preserved original motifs live under Custom-tagged Noodle Morphs genes
   const saddler = evaluatePhenotype(makeGenotype({ saddler: [1, 0] }), 0.4);
   assert.equal(saddler.patternRule.motif, 'saddles');
   assert.equal(saddler.patternRule.isCustomPattern, true);
