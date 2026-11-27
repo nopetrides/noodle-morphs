@@ -4,6 +4,17 @@ import {
   hasContentFlag,
 } from './contentFlags';
 import {
+  type BuiltinGeneFieldOverride,
+  type BuiltinGeneOverride,
+  type BuiltinGeneOverridesFile,
+  getBuiltinGeneOverride,
+  getBuiltinGeneOverridesSnapshot,
+  hasBuiltinFieldOverride,
+  hasBuiltinPaletteOverride,
+  makeBuiltinTextureId,
+  setRuntimeBuiltinGeneOverrides,
+} from './builtinGeneOverrides';
+import {
   applyAutomaticSynthesis,
   ELEMENTAL_LOCI_ORDER,
   ELEMENTAL_LOCUS_DEFINITIONS,
@@ -21,7 +32,15 @@ import {
   getModLocus,
   isModSynthesisOnlyLocus,
 } from './modPacks';
-import { clamp, createDefaultSkinFieldParams, SKIN_GENERATOR_VERSION } from './skinField';
+import { syncGrayscaleMapToWorkers, unsyncGrayscaleMapFromWorkers } from './renderScheduler';
+import { globalSkinCache } from './skinCache';
+import {
+  clamp,
+  createDefaultSkinFieldParams,
+  registerGrayscaleMapField,
+  SKIN_GENERATOR_VERSION,
+  unregisterGrayscaleMapField,
+} from './skinField';
 import type {
   AllelePair,
   BehaviorTrait,
@@ -517,6 +536,127 @@ export const LOCUS_DEFINITIONS: Record<LocusId, LocusDefinition> = {
   },
   ...ELEMENTAL_LOCUS_DEFINITIONS,
 };
+
+// Immutable snapshot of original code defaults so Dev Gene Editor can diff & reset cleanly
+const BASE_LOCUS_DEFINITIONS: Record<LocusId, LocusDefinition> = Object.fromEntries(
+  LOCI_ORDER.map((loc) => [
+    loc,
+    {
+      ...LOCUS_DEFINITIONS[loc],
+      tags: [...LOCUS_DEFINITIONS[loc].tags],
+    },
+  ])
+) as Record<LocusId, LocusDefinition>;
+
+const registeredBuiltinTextureIds = new Set<string>();
+
+export function getBaseLocusDefinition(locusId: LocusId): LocusDefinition {
+  const base = BASE_LOCUS_DEFINITIONS[locusId];
+  return { ...base, tags: [...base.tags] };
+}
+
+/**
+ * Syncs runtime built-in gene overrides (loaded from `src/game/builtinGeneOverridesData.ts`
+ * or updated live in Dev Gene Editor) onto `LOCUS_DEFINITIONS`, registered UV texture maps,
+ * and clears cached skins so every canvas reflects the change immediately.
+ */
+export function syncBuiltinGeneOverridesToRuntime(): void {
+  for (const mapId of registeredBuiltinTextureIds) {
+    unregisterGrayscaleMapField(mapId);
+    unsyncGrayscaleMapFromWorkers(mapId);
+  }
+  registeredBuiltinTextureIds.clear();
+
+  const snapshot = getBuiltinGeneOverridesSnapshot();
+  for (const loc of LOCI_ORDER) {
+    const base = BASE_LOCUS_DEFINITIONS[loc];
+    const ov = snapshot.genes[loc];
+    const next: LocusDefinition = {
+      ...base,
+      tags: [...base.tags],
+    };
+    if (ov) {
+      if (ov.name !== undefined) next.name = ov.name;
+      if (ov.superName !== undefined) next.superName = ov.superName;
+      if (ov.mode !== undefined) {
+        next.mode = ov.mode;
+        if (ov.mode !== 'codominant' && ov.superName === undefined) {
+          delete next.superName;
+        }
+      }
+      if (ov.shortCode !== undefined) next.shortCode = ov.shortCode;
+      if (ov.description !== undefined) next.description = ov.description;
+      if (ov.visualEffect !== undefined) next.visualEffect = ov.visualEffect;
+      if (ov.rarityWeight !== undefined) next.rarityWeight = ov.rarityWeight;
+      if (ov.tags !== undefined && ov.tags.length > 0) next.tags = [...ov.tags];
+
+      if (ov.customTexture) {
+        const mapId = makeBuiltinTextureId(loc);
+        const buf = new Float32Array(ov.customTexture.data);
+        registerGrayscaleMapField(mapId, ov.customTexture.width, ov.customTexture.height, buf);
+        syncGrayscaleMapToWorkers(mapId, ov.customTexture.width, ov.customTexture.height, buf);
+        registeredBuiltinTextureIds.add(mapId);
+      }
+    }
+    LOCUS_DEFINITIONS[loc] = next;
+  }
+
+  globalSkinCache.clear();
+}
+
+export function applyBuiltinGeneOverrides(next: BuiltinGeneOverridesFile): void {
+  setRuntimeBuiltinGeneOverrides(next);
+  syncBuiltinGeneOverridesToRuntime();
+}
+
+// Apply any checked-in project overrides immediately on module initialization
+syncBuiltinGeneOverridesToRuntime();
+
+const ELEMENTAL_LOCI_SET = new Set<LocusId>(ELEMENTAL_LOCI_ORDER);
+
+function buildBuiltinFieldContribution(
+  locusId: LocusId,
+  spec: BuiltinGeneFieldOverride,
+  ov: BuiltinGeneOverride
+): { contribution: FieldContribution; customMapId?: string } {
+  const hasTex = spec.field === 'custom_map' && Boolean(ov.customTexture);
+  const customMapId = hasTex ? makeBuiltinTextureId(locusId) : undefined;
+  return {
+    contribution: {
+      field: spec.field === 'custom_map' && !hasTex ? 'crystal_facets' : spec.field,
+      operation: spec.operation,
+      strength: spec.strength,
+      ...(spec.frequency !== undefined ? { frequency: spec.frequency } : {}),
+      ...(spec.aspectRatio !== undefined ? { aspectRatio: spec.aspectRatio } : {}),
+      ...(spec.phase !== undefined ? { phase: spec.phase } : {}),
+      ...(spec.params ? { params: { ...spec.params } } : {}),
+    },
+    ...(customMapId ? { customMapId } : {}),
+  };
+}
+
+function applyBuiltinParamOverrides(
+  params: ReturnType<typeof createDefaultSkinFieldParams>,
+  po: BuiltinGeneFieldOverride['paramOverrides']
+): void {
+  if (!po) return;
+  if (typeof po.coverage === 'number') params.coverage = params.coverage * 0.25 + po.coverage * 0.75;
+  if (typeof po.frequency === 'number') params.frequency = params.frequency * 0.25 + po.frequency * 0.75;
+  if (typeof po.aspectRatio === 'number') params.aspectRatio = params.aspectRatio * 0.25 + po.aspectRatio * 0.75;
+  if (typeof po.warpStrength === 'number') params.warpStrength = po.warpStrength;
+  if (typeof po.dorsalBias === 'number') params.dorsalBias = po.dorsalBias;
+  if (typeof po.symmetry === 'number') params.symmetry = po.symmetry;
+  if (typeof po.eyeCount === 'number') params.eyeCount = po.eyeCount;
+  if (typeof po.eyeStrength === 'number') params.eyeStrength = po.eyeStrength;
+  if (typeof po.edgeSoftness === 'number') params.edgeSoftness = po.edgeSoftness;
+  if (typeof po.blush === 'number') params.blush = po.blush;
+  if (typeof po.flankFlame === 'number') params.flankFlame = po.flankFlame;
+  if (typeof po.speckleAmount === 'number') params.speckleAmount = po.speckleAmount;
+  if (typeof po.calicoRise === 'number') params.calicoRise = po.calicoRise;
+  if (typeof po.piebaldAmount === 'number') params.piebaldAmount = po.piebaldAmount;
+  if (typeof po.scaleRelief === 'number') params.scaleRelief = po.scaleRelief;
+  if (typeof po.accentBandStrength === 'number') params.accentBandStrength = po.accentBandStrength;
+}
 
 export function getLocusContentFlag(locusId: LocusId): ContentFlag {
   const def = LOCUS_DEFINITIONS[locusId];
@@ -1076,51 +1216,54 @@ function derivePalette(
   polygenicSeed = 0.5,
   modAlleles?: ModAlleleMap
 ): SnakePalette {
-  const bel = isBlueEyedLeucistic(genotype);
-  const blackEl = isBlackEyedLeucistic(genotype);
-  const ivory = isIvory(genotype);
-  const eightBall = isEightBall(genotype);
-  const albino = countAlleles(genotype.albino) === 2;
-  const lavenderAlbino = countAlleles(genotype.lavenderalbino) === 2;
-  const ultramel = countAlleles(genotype.ultramel) === 2;
-  const axanthic = countAlleles(genotype.axanthic) === 2;
+  const effPal = (loc: LocusId): 0 | 1 | 2 =>
+    hasBuiltinPaletteOverride(loc) ? 0 : countAlleles(genotype[loc]);
+  const bel =
+    !hasBuiltinPaletteOverride('mojave') && !hasBuiltinPaletteOverride('lesser') && isBlueEyedLeucistic(genotype);
+  const blackEl = !hasBuiltinPaletteOverride('fire') && isBlackEyedLeucistic(genotype);
+  const ivory = !hasBuiltinPaletteOverride('yellowbelly') && isIvory(genotype);
+  const eightBall = !hasBuiltinPaletteOverride('blackpastel') && isEightBall(genotype);
+  const albino = effPal('albino') === 2;
+  const lavenderAlbino = effPal('lavenderalbino') === 2;
+  const ultramel = effPal('ultramel') === 2;
+  const axanthic = effPal('axanthic') === 2;
   const piebald = countAlleles(genotype.piebald) === 2;
-  const desertGhost = countAlleles(genotype.desertghost) === 2;
-  const hypo = countAlleles(genotype.hypo) === 2;
-  const pastel = countAlleles(genotype.pastel);
-  const enchi = countAlleles(genotype.enchi);
-  const mojave = countAlleles(genotype.mojave);
-  const lesser = countAlleles(genotype.lesser);
-  const spider = countAlleles(genotype.spider) >= 1;
-  const pinstripe = countAlleles(genotype.pinstripe) >= 1;
-  const clown = countAlleles(genotype.clown) === 2;
-  const banana = countAlleles(genotype.banana);
-  const fire = countAlleles(genotype.fire);
-  const yellowbelly = countAlleles(genotype.yellowbelly);
-  const blackpastel = countAlleles(genotype.blackpastel);
-  const ghi = countAlleles(genotype.ghi);
-  const cypress = countAlleles(genotype.cypress);
+  const desertGhost = effPal('desertghost') === 2;
+  const hypo = effPal('hypo') === 2;
+  const pastel = effPal('pastel');
+  const enchi = effPal('enchi');
+  const mojave = effPal('mojave');
+  const lesser = effPal('lesser');
+  const spider = effPal('spider') >= 1;
+  const pinstripe = effPal('pinstripe') >= 1;
+  const clown = effPal('clown') === 2;
+  const banana = effPal('banana');
+  const fire = effPal('fire');
+  const yellowbelly = effPal('yellowbelly');
+  const blackpastel = effPal('blackpastel');
+  const ghi = effPal('ghi');
+  const cypress = effPal('cypress');
   const calico = countAlleles(genotype.calico) >= 1;
   const cobblestone = isCobblestone(genotype);
   const obsidianCobble = isObsidianCobblestone(genotype);
-  const magma = countAlleles(genotype.magma);
-  const tidal = countAlleles(genotype.tidal);
-  const saddler = countAlleles(genotype.saddler) >= 1;
-  const bullring = countAlleles(genotype.bullring);
-  const chevron = countAlleles(genotype.chevron);
-  const raindrop = countAlleles(genotype.raindrop) === 2;
-  const crossbar = countAlleles(genotype.crossbar) >= 1;
-  const trackline = countAlleles(genotype.trackline) >= 1;
-  const milksnake = countAlleles(genotype.milksnake);
-  const invert = countAlleles(genotype.invert) === 2;
-  const monsoon = countAlleles(genotype.monsoon) === 2;
-  const sunset = countAlleles(genotype.sunset) === 2;
-  const geneticstripe = countAlleles(genotype.geneticstripe) === 2;
-  const tristripe = countAlleles(genotype.tristripe) === 2;
-  const leopard = countAlleles(genotype.leopard);
-  const monarch = countAlleles(genotype.monarch) === 2;
-  const cinnamon = countAlleles(genotype.cinnamon);
-  const blade = countAlleles(genotype.blade);
+  const magma = effPal('magma');
+  const tidal = effPal('tidal');
+  const saddler = effPal('saddler') >= 1;
+  const bullring = effPal('bullring');
+  const chevron = effPal('chevron');
+  const raindrop = effPal('raindrop') === 2;
+  const crossbar = effPal('crossbar') >= 1;
+  const trackline = effPal('trackline') >= 1;
+  const milksnake = effPal('milksnake');
+  const invert = effPal('invert') === 2;
+  const monsoon = effPal('monsoon') === 2;
+  const sunset = effPal('sunset') === 2;
+  const geneticstripe = effPal('geneticstripe') === 2;
+  const tristripe = effPal('tristripe') === 2;
+  const leopard = effPal('leopard');
+  const monarch = effPal('monarch') === 2;
+  const cinnamon = effPal('cinnamon');
+  const blade = effPal('blade');
   const isStrongMelanistic = eightBall || cinnamon === 2;
   const pigmentVoices: Array<{ hex: string; weight: number }> = [];
   const addPigmentVoice = (hex: string, weight: number) => {
@@ -1404,6 +1547,40 @@ function derivePalette(
   let translucentCount = 0;
   for (const { profile, count } of activeElementals) {
     const hasExisting = hasPriorPigment || magma >= 1 || tidal >= 1 || pigmentVoices.length > 0;
+    const ov = getBuiltinGeneOverride(profile.locusId);
+    const palOv = ov?.palette1x
+      ? count === 2 && ov.palette2x
+        ? ov.palette2x
+        : ov.palette1x
+      : undefined;
+
+    if (palOv) {
+      const rawW = clamp(palOv.pigmentWeight ?? 1.0, 0.2, 1);
+      const mixAmt = hasExisting ? Math.min(rawW * 0.82, 0.78) : rawW;
+      base = mixHex(base, palOv.base, mixAmt);
+      patternPrimary = mixHex(patternPrimary, palOv.patternPrimary, hasExisting ? Math.min(mixAmt + 0.08, 0.85) : rawW);
+      if (palOv.patternSecondary) {
+        patternSecondary = mixHex(patternSecondary, palOv.patternSecondary, mixAmt);
+      }
+      if (palOv.headBlush) {
+        headBlush = mixHex(headBlush, palOv.headBlush, mixAmt);
+      } else {
+        headBlush = mixHex(headBlush, palOv.base, mixAmt);
+      }
+      if (palOv.belly) belly = mixHex(belly, palOv.belly, mixAmt);
+      if (palOv.outline) outline = mixHex(outline, palOv.outline, mixAmt);
+      if (palOv.eyeIris && !albino && !lavenderAlbino) eyeIris = palOv.eyeIris;
+      if (palOv.accentColor) accentColor = palOv.accentColor;
+      addPigmentVoice(palOv.base, count === 2 ? Math.max(0.75, rawW) : rawW * 0.8);
+
+      const op = palOv.bodyOpacity;
+      if (op !== undefined && op < 0.99) {
+        translucentSum += op;
+        translucentCount++;
+      }
+      continue;
+    }
+
     const rawDosage = count === 2 ? profile.dosage2x : profile.dosage1x;
     const mixAmt = hasExisting ? Math.min(rawDosage, 0.62) : rawDosage;
     const targetBase = count === 2 ? profile.superBaseHex : profile.baseHex;
@@ -1502,6 +1679,45 @@ function derivePalette(
 
   if (monarch && !albino && !lavenderAlbino) {
     addPigmentVoice('#8E6F9E', 0.62);
+  }
+
+  // Apply Dev Gene Editor palette overrides for non-elemental Core & Fun loci
+  let appliedBuiltinPaletteCount = 0;
+  for (const loc of LOCI_ORDER) {
+    if (ELEMENTAL_LOCI_SET.has(loc)) continue;
+    const ov = getBuiltinGeneOverride(loc);
+    if (!ov?.palette1x) continue;
+    const count = countAlleles(genotype[loc]);
+    if (count === 0) continue;
+    const def = LOCUS_DEFINITIONS[loc];
+    if (def.mode === 'recessive' && count < 2) continue;
+    const pal = count === 2 && ov.palette2x ? ov.palette2x : ov.palette1x;
+    const hasOtherDrivers =
+      hasPriorPigment || hasElemental || banana >= 1 || appliedBuiltinPaletteCount > 0;
+    const rawW = clamp(pal.pigmentWeight ?? 1.0, 0.2, 1);
+    const w = hasOtherDrivers ? clamp(rawW * 0.82, 0.25, 0.92) : rawW;
+    const secW = hasOtherDrivers ? clamp(w * 0.9, 0.25, 0.94) : rawW;
+    base = mixHex(base, pal.base, w);
+    patternPrimary = mixHex(patternPrimary, pal.patternPrimary, secW);
+    if (pal.patternSecondary) {
+      patternSecondary = mixHex(patternSecondary, pal.patternSecondary, secW);
+    }
+    if (pal.headBlush) {
+      headBlush = mixHex(headBlush, pal.headBlush, secW);
+    } else {
+      headBlush = mixHex(headBlush, pal.base, secW);
+    }
+    if (pal.accentColor) {
+      accentColor = accentColor ? mixHex(accentColor, pal.accentColor, 0.6) : pal.accentColor;
+    }
+    if (pal.belly) belly = mixHex(belly, pal.belly, w * 0.85);
+    if (pal.outline) outline = mixHex(outline, pal.outline, w * 0.8);
+    if (pal.eyeIris) eyeIris = mixHex(eyeIris, pal.eyeIris, w * 0.85);
+    if (typeof pal.bodyOpacity === 'number' && pal.bodyOpacity < bodyOpacity) {
+      bodyOpacity = clamp(pal.bodyOpacity, 0.28, 1);
+    }
+    pigmentVoices.push({ hex: pal.base, weight: w });
+    appliedBuiltinPaletteCount++;
   }
 
   // Blend active visual Workshop / local Gene Pack palettes BEFORE melanin/albino/invert filters
@@ -1815,48 +2031,51 @@ export function deriveSkinPhenotypeSpec(
   const params = createDefaultSkinFieldParams();
   const contributions: FieldContribution[] = [];
 
-  const bel = isBlueEyedLeucistic(genotype);
-  const blackEl = isBlackEyedLeucistic(genotype);
-  const ivory = isIvory(genotype);
-  const eightBall = isEightBall(genotype);
+  const effField = (loc: LocusId): 0 | 1 | 2 =>
+    hasBuiltinFieldOverride(loc) ? 0 : countAlleles(genotype[loc]);
+  const bel =
+    !hasBuiltinFieldOverride('mojave') && !hasBuiltinFieldOverride('lesser') && isBlueEyedLeucistic(genotype);
+  const blackEl = !hasBuiltinFieldOverride('fire') && isBlackEyedLeucistic(genotype);
+  const ivory = !hasBuiltinFieldOverride('yellowbelly') && isIvory(genotype);
+  const eightBall = !hasBuiltinFieldOverride('blackpastel') && isEightBall(genotype);
   const cobblestone = isCobblestone(genotype);
   const obsidianCobble = isObsidianCobblestone(genotype);
 
-  const pastel = countAlleles(genotype.pastel);
-  const mojave = countAlleles(genotype.mojave);
-  const lesser = countAlleles(genotype.lesser);
-  const enchi = countAlleles(genotype.enchi);
-  const spider = countAlleles(genotype.spider);
-  const pinstripe = countAlleles(genotype.pinstripe);
-  const piebald = countAlleles(genotype.piebald) === 2;
-  const clown = countAlleles(genotype.clown) === 2;
-  const banana = countAlleles(genotype.banana);
-  const fire = countAlleles(genotype.fire);
-  const yellowbelly = countAlleles(genotype.yellowbelly);
-  const blackpastel = countAlleles(genotype.blackpastel);
-  const ghi = countAlleles(genotype.ghi);
-  const cypress = countAlleles(genotype.cypress);
-  const calico = countAlleles(genotype.calico) >= 1;
-  const desertghost = countAlleles(genotype.desertghost) === 2;
-  const hypo = countAlleles(genotype.hypo) === 2;
+  const pastel = effField('pastel');
+  const mojave = effField('mojave');
+  const lesser = effField('lesser');
+  const enchi = effField('enchi');
+  const spider = effField('spider');
+  const pinstripe = effField('pinstripe');
+  const piebald = effField('piebald') === 2;
+  const clown = effField('clown') === 2;
+  const banana = effField('banana');
+  const fire = effField('fire');
+  const yellowbelly = effField('yellowbelly');
+  const blackpastel = effField('blackpastel');
+  const ghi = effField('ghi');
+  const cypress = effField('cypress');
+  const calico = effField('calico') >= 1;
+  const desertghost = effField('desertghost') === 2;
+  const hypo = effField('hypo') === 2;
 
-  const saddler = countAlleles(genotype.saddler) >= 1;
-  const bullring = countAlleles(genotype.bullring);
-  const chevron = countAlleles(genotype.chevron);
-  const raindrop = countAlleles(genotype.raindrop) === 2;
-  const magma = countAlleles(genotype.magma);
-  const tidal = countAlleles(genotype.tidal);
-  const crossbar = countAlleles(genotype.crossbar) >= 1;
-  const trackline = countAlleles(genotype.trackline) >= 1;
-  const milksnake = countAlleles(genotype.milksnake);
-  const monsoon = countAlleles(genotype.monsoon) === 2;
-  const sunset = countAlleles(genotype.sunset) === 2;
-  const geneticstripe = countAlleles(genotype.geneticstripe) === 2;
-  const tristripe = countAlleles(genotype.tristripe) === 2;
-  const leopard = countAlleles(genotype.leopard);
-  const monarch = countAlleles(genotype.monarch) === 2;
-  const cinnamon = countAlleles(genotype.cinnamon);
-  const blade = countAlleles(genotype.blade);
+  const saddler = effField('saddler') >= 1;
+  const bullring = effField('bullring');
+  const chevron = effField('chevron');
+  const raindrop = effField('raindrop') === 2;
+  const magma = effField('magma');
+  const tidal = effField('tidal');
+  const crossbar = effField('crossbar') >= 1;
+  const trackline = effField('trackline') >= 1;
+  const milksnake = effField('milksnake');
+  const monsoon = effField('monsoon') === 2;
+  const sunset = effField('sunset') === 2;
+  const geneticstripe = effField('geneticstripe') === 2;
+  const tristripe = effField('tristripe') === 2;
+  const leopard = effField('leopard');
+  const monarch = effField('monarch') === 2;
+  const cinnamon = effField('cinnamon');
+  const blade = effField('blade');
 
   // Individual polygenic expression variance (zero extra save bytes; spans low-to-high expression per snake)
   const vFreq = (seededFloat(polygenicSeed, 11) - 0.5) * 0.26;
@@ -2418,6 +2637,7 @@ export function deriveSkinPhenotypeSpec(
   }
 
   // Symmetric bespoke contributions for all 35 Element & Mineral synthesis loci (Tiers 0-5)
+  let customMapId: string | undefined;
   let activeElementalCount = 0;
   for (const prof of ELEMENTAL_VISUAL_PROFILES) {
     const c = countAlleles(genotype[prof.locusId]);
@@ -2426,6 +2646,15 @@ export function deriveSkinPhenotypeSpec(
     if (!isVisual) continue;
     activeElementalCount++;
     const count = c as 1 | 2;
+    const ov = getBuiltinGeneOverride(prof.locusId);
+    if (ov?.field1x) {
+      const fSpec = count === 2 && ov.field2x ? ov.field2x : ov.field1x;
+      const built = buildBuiltinFieldContribution(prof.locusId, fSpec, ov);
+      contributions.push(built.contribution);
+      if (built.customMapId) customMapId = built.customMapId;
+      applyBuiltinParamOverrides(params, fSpec.paramOverrides);
+      continue;
+    }
     const covDelta = count === 2 ? (prof.coverageDelta2x ?? prof.coverageDelta1x ?? 0) : (prof.coverageDelta1x ?? 0);
     params.coverage += covDelta;
     if (prof.edgeSoftness !== undefined) params.edgeSoftness = Math.min(params.edgeSoftness, prof.edgeSoftness);
@@ -2527,8 +2756,23 @@ export function deriveSkinPhenotypeSpec(
     });
   }
 
+  // Apply Dev Gene Editor field overrides for non-elemental Core & Fun loci
+  for (const loc of LOCI_ORDER) {
+    if (ELEMENTAL_LOCI_SET.has(loc)) continue;
+    const ov = getBuiltinGeneOverride(loc);
+    if (!ov?.field1x) continue;
+    const count = countAlleles(genotype[loc]);
+    if (count === 0) continue;
+    const def = LOCUS_DEFINITIONS[loc];
+    if (def.mode === 'recessive' && count < 2) continue;
+    const fSpec = count === 2 && ov.field2x ? ov.field2x : ov.field1x;
+    const built = buildBuiltinFieldContribution(loc, fSpec, ov);
+    contributions.push(built.contribution);
+    if (built.customMapId) customMapId = built.customMapId;
+    applyBuiltinParamOverrides(params, fSpec.paramOverrides);
+  }
+
   // Apply active visual Workshop / local Gene Pack scalar field contributions & custom UV textures
-  let customMapId: string | undefined;
   if (modAlleles) {
     const modEntries = Object.entries(modAlleles).sort(([a], [b]) => a.localeCompare(b));
     for (const [fullId, pair] of modEntries) {
@@ -2752,9 +2996,36 @@ export function evaluatePhenotype(
   const cinnamon = countAlleles(genotype.cinnamon);
   const blade = countAlleles(genotype.blade);
 
+  const pushSingleLocusName = (loc: LocusId, c: 0 | 1 | 2) => {
+    if (c === 0) return;
+    const def = LOCUS_DEFINITIONS[loc];
+    if (def.mode === 'recessive') {
+      if (c === 2) {
+        visualGenes.push(def.name);
+        addTags(loc);
+      } else {
+        hetGenes.push(def.name);
+      }
+    } else if (def.mode === 'codominant' && c === 2) {
+      visualGenes.push(def.superName ?? `Super ${def.name}`);
+      addTags(loc);
+    } else {
+      visualGenes.push(def.name);
+      addTags(loc);
+    }
+  };
+
   // Iconic real-world named combos: Killer Bee (Super Pastel + Spider) & Bumblebee (Pastel + Spider)
-  const isKillerBee = pastel === 2 && spider >= 1;
-  const isBumblebee = pastel === 1 && spider >= 1;
+  const isKillerBee =
+    LOCUS_DEFINITIONS.pastel.mode !== 'recessive' &&
+    LOCUS_DEFINITIONS.spider.mode !== 'recessive' &&
+    pastel === 2 &&
+    spider >= 1;
+  const isBumblebee =
+    LOCUS_DEFINITIONS.pastel.mode !== 'recessive' &&
+    LOCUS_DEFINITIONS.spider.mode !== 'recessive' &&
+    pastel === 1 &&
+    spider >= 1;
 
   if (isKillerBee) {
     visualGenes.push('Killer Bee');
@@ -2764,259 +3035,69 @@ export function evaluatePhenotype(
     visualGenes.push('Bumblebee');
     addTags('pastel');
     addTags('spider');
-  } else if (pastel === 2) {
-    visualGenes.push('Super Pastel');
-    addTags('pastel');
-  } else if (pastel === 1) {
-    visualGenes.push('Pastel');
-    addTags('pastel');
+  } else {
+    pushSingleLocusName('pastel', pastel);
   }
 
-  if (banana === 2) {
-    visualGenes.push('Super Banana');
-    addTags('banana');
-  } else if (banana === 1) {
-    visualGenes.push('Banana');
-    addTags('banana');
-  }
+  pushSingleLocusName('banana', banana);
+  pushSingleLocusName('enchi', enchi);
+  pushSingleLocusName('ghi', ghi);
+  pushSingleLocusName('cypress', cypress);
 
-  if (enchi === 2) {
-    visualGenes.push('Super Enchi');
-    addTags('enchi');
-  } else if (enchi === 1) {
-    visualGenes.push('Enchi');
-    addTags('enchi');
+  if (!isKillerBee && !isBumblebee) {
+    pushSingleLocusName('spider', spider);
   }
-
-  if (ghi === 2) {
-    visualGenes.push('Super GHI');
-    addTags('ghi');
-  } else if (ghi === 1) {
-    visualGenes.push('GHI');
-    addTags('ghi');
-  }
-
-  if (cypress === 2) {
-    visualGenes.push('Super Cypress');
-    addTags('cypress');
-  } else if (cypress === 1) {
-    visualGenes.push('Cypress');
-    addTags('cypress');
-  }
-
-  if (spider >= 1 && !isKillerBee && !isBumblebee) {
-    visualGenes.push('Spider');
-    addTags('spider');
-  }
-  if (pinstripe >= 1) {
-    visualGenes.push('Pinstripe');
-    addTags('pinstripe');
-  }
-  if (calico >= 1) {
-    visualGenes.push('Calico');
-    addTags('calico');
-  }
+  pushSingleLocusName('pinstripe', pinstripe);
+  pushSingleLocusName('calico', calico);
 
   if (bel) {
     visualGenes.push('Blue-Eyed Leucistic');
     addTags('mojave');
     addTags('lesser');
   } else {
-    if (mojave === 1) {
-      visualGenes.push('Mojave');
-      addTags('mojave');
-    }
-    if (lesser === 1) {
-      visualGenes.push('Lesser');
-      addTags('lesser');
-    }
+    pushSingleLocusName('mojave', mojave);
+    pushSingleLocusName('lesser', lesser);
   }
 
-  if (blackEl) {
-    visualGenes.push('Black-Eyed Leucistic');
-    addTags('fire');
-  } else if (fire === 1) {
-    visualGenes.push('Fire');
-    addTags('fire');
-  }
-
-  if (ivory) {
-    visualGenes.push('Ivory');
-    addTags('yellowbelly');
-  } else if (yellowbelly === 1) {
-    visualGenes.push('Yellow Belly');
-    addTags('yellowbelly');
-  }
-
-  if (eightBall) {
-    visualGenes.push('8-Ball');
-    addTags('blackpastel');
-  } else if (blackpastel === 1) {
-    visualGenes.push('Black Pastel');
-    addTags('blackpastel');
-  }
+  pushSingleLocusName('fire', fire);
+  pushSingleLocusName('yellowbelly', yellowbelly);
+  pushSingleLocusName('blackpastel', blackpastel);
 
   if (albino === 2 && axanthic === 2) {
     visualGenes.push('Snow');
     addTags('albino');
     addTags('axanthic');
   } else {
-    if (albino === 2) {
-      visualGenes.push('Albino');
-      addTags('albino');
-    } else if (albino === 1) {
-      hetGenes.push('Albino');
-    }
-
-    if (axanthic === 2) {
-      visualGenes.push('Axanthic');
-      addTags('axanthic');
-    } else if (axanthic === 1) {
-      hetGenes.push('Axanthic');
-    }
+    pushSingleLocusName('albino', albino);
+    pushSingleLocusName('axanthic', axanthic);
   }
 
-  if (lavenderalbino === 2) {
-    visualGenes.push('Lavender Albino');
-    addTags('lavenderalbino');
-  } else if (lavenderalbino === 1) {
-    hetGenes.push('Lavender Albino');
-  }
-
-  if (ultramel === 2) {
-    visualGenes.push('Ultramel');
-    addTags('ultramel');
-  } else if (ultramel === 1) {
-    hetGenes.push('Ultramel');
-  }
-
-  if (desertghost === 2) {
-    visualGenes.push('Desert Ghost');
-    addTags('desertghost');
-  } else if (desertghost === 1) {
-    hetGenes.push('Desert Ghost');
-  }
-
-  if (hypo === 2) {
-    visualGenes.push('Hypo');
-    addTags('hypo');
-  } else if (hypo === 1) {
-    hetGenes.push('Hypo');
-  }
-
-  if (piebald === 2) {
-    visualGenes.push('Piebald');
-    addTags('piebald');
-  } else if (piebald === 1) {
-    hetGenes.push('Piebald');
-  }
-
-  if (clown === 2) {
-    visualGenes.push('Clown');
-    addTags('clown');
-  } else if (clown === 1) {
-    hetGenes.push('Clown');
-  }
+  pushSingleLocusName('lavenderalbino', lavenderalbino);
+  pushSingleLocusName('ultramel', ultramel);
+  pushSingleLocusName('desertghost', desertghost);
+  pushSingleLocusName('hypo', hypo);
+  pushSingleLocusName('piebald', piebald);
+  pushSingleLocusName('clown', clown);
 
   // Additional Extreme Real-World Ball Python Genes
-  if (leopard === 2) {
-    visualGenes.push('Super Leopard');
-    addTags('leopard');
-  } else if (leopard === 1) {
-    visualGenes.push('Leopard');
-    addTags('leopard');
-  }
-  if (cinnamon === 2) {
-    visualGenes.push('Super Cinnamon');
-    addTags('cinnamon');
-  } else if (cinnamon === 1) {
-    visualGenes.push('Cinnamon');
-    addTags('cinnamon');
-  }
-  if (blade === 2) {
-    visualGenes.push('Super Blade');
-    addTags('blade');
-  } else if (blade === 1) {
-    visualGenes.push('Blade');
-    addTags('blade');
-  }
-  if (monsoon === 2) {
-    visualGenes.push('Monsoon');
-    addTags('monsoon');
-  } else if (monsoon === 1) {
-    hetGenes.push('Monsoon');
-  }
-  if (sunset === 2) {
-    visualGenes.push('Sunset');
-    addTags('sunset');
-  } else if (sunset === 1) {
-    hetGenes.push('Sunset');
-  }
-  if (geneticstripe === 2) {
-    visualGenes.push('Genetic Stripe');
-    addTags('geneticstripe');
-  } else if (geneticstripe === 1) {
-    hetGenes.push('Genetic Stripe');
-  }
-  if (tristripe === 2) {
-    visualGenes.push('Tri-Stripe');
-    addTags('tristripe');
-  } else if (tristripe === 1) {
-    hetGenes.push('Tri-Stripe');
-  }
-  if (monarch === 2) {
-    visualGenes.push('Monarch');
-    addTags('monarch');
-  } else if (monarch === 1) {
-    hetGenes.push('Monarch');
-  }
+  pushSingleLocusName('leopard', leopard);
+  pushSingleLocusName('cinnamon', cinnamon);
+  pushSingleLocusName('blade', blade);
+  pushSingleLocusName('monsoon', monsoon);
+  pushSingleLocusName('sunset', sunset);
+  pushSingleLocusName('geneticstripe', geneticstripe);
+  pushSingleLocusName('tristripe', tristripe);
+  pushSingleLocusName('monarch', monarch);
 
   // Custom Morpharium Originals
-  if (saddler >= 1) {
-    visualGenes.push('Saddler');
-    addTags('saddler');
-  }
-  if (bullring === 2) {
-    visualGenes.push('Super Bullring');
-    addTags('bullring');
-  } else if (bullring === 1) {
-    visualGenes.push('Bullring');
-    addTags('bullring');
-  }
-  if (chevron === 2) {
-    visualGenes.push('Super Chevron');
-    addTags('chevron');
-  } else if (chevron === 1) {
-    visualGenes.push('Chevron');
-    addTags('chevron');
-  }
-  if (raindrop === 2) {
-    visualGenes.push('Raindrop');
-    addTags('raindrop');
-  } else if (raindrop === 1) {
-    hetGenes.push('Raindrop');
-  }
-  if (crossbar >= 1) {
-    visualGenes.push('Crossbar');
-    addTags('crossbar');
-  }
-  if (trackline >= 1) {
-    visualGenes.push('Trackline');
-    addTags('trackline');
-  }
-  if (milksnake === 2) {
-    visualGenes.push('Super Milk Band');
-    addTags('milksnake');
-  } else if (milksnake === 1) {
-    visualGenes.push('Milk Band');
-    addTags('milksnake');
-  }
-  if (invert === 2) {
-    visualGenes.push('Inverted');
-    addTags('invert');
-  } else if (invert === 1) {
-    hetGenes.push('Inverted');
-  }
+  pushSingleLocusName('saddler', saddler);
+  pushSingleLocusName('bullring', bullring);
+  pushSingleLocusName('chevron', chevron);
+  pushSingleLocusName('raindrop', raindrop);
+  pushSingleLocusName('crossbar', crossbar);
+  pushSingleLocusName('trackline', trackline);
+  pushSingleLocusName('milksnake', milksnake);
+  pushSingleLocusName('invert', invert);
 
   // Extreme Custom Elemental Fusion & Synthesis Tree (Water, Lava, plus all 35 Tier 0-5 loci)
   const legacyCobbleOnly =
@@ -3030,20 +3111,8 @@ export function evaluatePhenotype(
     addTags('magma');
     addTags('tidal');
   } else {
-    if (magma === 2) {
-      visualGenes.push('Super Lava');
-      addTags('magma');
-    } else if (magma === 1) {
-      visualGenes.push('Lava');
-      addTags('magma');
-    }
-    if (tidal === 2) {
-      visualGenes.push('Super Water');
-      addTags('tidal');
-    } else if (tidal === 1) {
-      visualGenes.push('Water');
-      addTags('tidal');
-    }
+    pushSingleLocusName('magma', magma);
+    pushSingleLocusName('tidal', tidal);
   }
 
   let maxElementalTier = 0;

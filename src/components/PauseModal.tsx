@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FolderOpen, Gauge, Monitor, Save } from 'lucide-react';
+import { FolderOpen, Gauge, Monitor, Save, Wrench } from 'lucide-react';
 import { getGameModeLabel, type GameConfig, type SaveSlotId } from '../game/contentFlags';
 import {
   type BackgroundRenderMode,
@@ -20,6 +20,7 @@ interface PauseModalProps {
   onResume: () => void;
   onOpenSaveModal: () => void;
   onOpenLoadModal: () => void;
+  onOpenDevGeneEditor?: () => void;
   onReturnTitle: () => void;
   onResetTerrarium: () => void;
 }
@@ -42,6 +43,7 @@ export function PauseModal({
   onResume,
   onOpenSaveModal,
   onOpenLoadModal,
+  onOpenDevGeneEditor,
   onReturnTitle,
   onResetTerrarium,
 }: PauseModalProps) {
@@ -195,6 +197,18 @@ export function PauseModal({
               <span>Load</span>
             </button>
           </div>
+
+          {onOpenDevGeneEditor && (
+            <button
+              type="button"
+              data-testid="pause-dev-gene-editor-btn"
+              onClick={onOpenDevGeneEditor}
+              className="w-full py-2.5 px-4 rounded-xl bg-[#342615] hover:bg-[#46331B] border border-[#D9A754]/45 text-[#F7DFAA] font-semibold text-sm transition-colors cursor-pointer inline-flex items-center justify-center gap-2"
+            >
+              <Wrench className="w-3.5 h-3.5 text-[#F1CD82]" aria-hidden="true" />
+              <span>Dev Gene Editor</span>
+            </button>
+          )}
 
           <button
             type="button"

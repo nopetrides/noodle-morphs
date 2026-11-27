@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FolderOpen, LogOut, Package, Play, PlusCircle } from 'lucide-react';
+import { FolderOpen, LogOut, Package, Play, PlusCircle, Wrench } from 'lucide-react';
 import { getGameModeLabel } from '../game/contentFlags';
 import type { SaveSlotSummary } from '../game/storage';
 
@@ -11,6 +11,7 @@ interface TitleOverlayProps {
   onNewGame: () => void;
   onLoadGame: () => void;
   onOpenModPacks: () => void;
+  onOpenDevGeneEditor?: () => void;
 }
 
 export function TitleOverlay({
@@ -21,6 +22,7 @@ export function TitleOverlay({
   onNewGame,
   onLoadGame,
   onOpenModPacks,
+  onOpenDevGeneEditor,
 }: TitleOverlayProps) {
   const [exitNotice, setExitNotice] = useState(false);
 
@@ -194,6 +196,21 @@ export function TitleOverlay({
               {installedPackCount > 0 ? `${installedPackCount} installed` : 'Workshop'}
             </span>
           </button>
+
+          {onOpenDevGeneEditor && (
+            <button
+              type="button"
+              data-testid="title-dev-gene-editor-btn"
+              onClick={onOpenDevGeneEditor}
+              className="w-full px-5 py-2.5 rounded-xl bg-[#342615]/95 hover:bg-[#46331B] text-[#F7DFAA] border border-[#D9A754]/50 font-semibold text-sm transition-all duration-150 cursor-pointer flex items-center justify-between gap-2.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#F5D692]"
+            >
+              <span className="inline-flex items-center gap-2.5">
+                <Wrench className="w-4 h-4 text-[#F1CD82]" aria-hidden="true" />
+                <span>Dev Gene Editor</span>
+              </span>
+              <span className="text-[10px] font-mono-code text-[#E6BE70]">CORE &amp; FUN</span>
+            </button>
+          )}
 
           <button
             type="button"
