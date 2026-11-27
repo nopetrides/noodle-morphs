@@ -41,6 +41,47 @@ export function normalizeAngle(angle: number): number {
   return a;
 }
 
+/**
+ * Subdivides body points (node 1..N-1) along a smooth Catmull-Rom curve (~6x denser)
+ * so ground-trail arc-length sampling never chugs across coarse segment-length chords.
+ */
+export function buildSmoothTrailFromPoints(
+  points: SpinePoint[],
+  subdivisions = 6
+): Array<{ x: number; y: number }> {
+  const body = points.slice(1);
+  if (body.length < 2) return body.map((p) => ({ x: p.x, y: p.y }));
+
+  const trail: Array<{ x: number; y: number }> = [{ x: body[0].x, y: body[0].y }];
+  for (let i = 0; i < body.length - 1; i++) {
+    const p0 = body[Math.max(0, i - 1)];
+    const p1 = body[i];
+    const p2 = body[i + 1];
+    const p3 = body[Math.min(body.length - 1, i + 2)];
+
+    for (let s = 1; s <= subdivisions; s++) {
+      const t = s / subdivisions;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      trail.push({
+        x:
+          0.5 *
+          (2 * p1.x +
+            (-p0.x + p2.x) * t +
+            (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
+            (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+        y:
+          0.5 *
+          (2 * p1.y +
+            (-p0.y + p2.y) * t +
+            (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
+            (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3),
+      });
+    }
+  }
+  return trail;
+}
+
 export function createSpine(
   startX: number,
   startY: number,
@@ -76,13 +117,15 @@ export function createSpine(
         radius: getBallPythonRadius(t, baseRadius),
       });
     } else {
-      // Nodes 2..N-1: flexible neck & body starting in a natural cozy S-curve
+      // Nodes 2..N-1: gentle smooth-onset S-curve (tapered near neck so node 1->2 never kinks)
       const bodyIndex = i - 1;
       const bodyT = bodyIndex / Math.max(1, segmentCount - 2);
-      const wave = Math.sin(bodyT * Math.PI * 2.3) * segmentLength * 2.5;
+      const neckEase = Math.min(1, bodyT / 0.25);
+      const smoothEase = neckEase * neckEase * (3 - 2 * neckEase);
+      const wave = Math.sin(bodyT * Math.PI * 2.1) * segmentLength * 1.65 * smoothEase;
       points.push({
-        x: startX + backX * bodyIndex * segmentLength * 0.92 + perpX * wave,
-        y: startY + backY * bodyIndex * segmentLength * 0.92 + perpY * wave,
+        x: startX + backX * bodyIndex * segmentLength * 0.96 + perpX * wave,
+        y: startY + backY * bodyIndex * segmentLength * 0.96 + perpY * wave,
         angle: heading,
         radius: getBallPythonRadius(t, baseRadius),
       });
@@ -92,8 +135,8 @@ export function createSpine(
   // Enforce rigid snout + exact distance & angular constraints down the body
   solveDistanceAndAngleConstraints(points, segmentLength, 0.46);
 
-  // Seed ground-space path history directly from initial headPivot (node 1) back to tail
-  const trail = points.slice(1).map((p) => ({ x: p.x, y: p.y }));
+  // Seed smooth dense ground-space path history directly from initial headPivot (node 1) back to tail
+  const trail = buildSmoothTrailFromPoints(points, 6);
 
   return {
     points,
@@ -102,7 +145,7 @@ export function createSpine(
     baseRadius,
     maxTurnAngle: 0.46,
     heading,
-    slitherPhase: Math.random() * Math.PI * 2,
+    slitherPhase: 0,
     tongueTimer: 1.5 + Math.random() * 4,
     tongueActive: 0,
     wobblePhase: Math.random() * Math.PI * 2,
@@ -297,12 +340,13 @@ export function stepSpine(spine: SnakeSpine, opts: StepSpineOptions): void {
     spine.heading + Math.sin(spine.slitherPhase) * slitherAmp + wobbleOffset
   );
 
-  // Keep desired head orientation within natural neck bend limit relative to node 2 -> node 1
+  // Keep desired head orientation strictly inside natural neck bend limit relative to node 2 -> node 1
+  // (strictly < maxTurnAngle so solveDistanceAndAngleConstraints never yanks node 2 off the trail)
   if (spine.points.length >= 3) {
     const neck = spine.points[2];
     const neckForward = Math.atan2(headPivot.y - neck.y, headPivot.x - neck.x);
     const neckDelta = normalizeAngle(desiredMoveAngle - neckForward);
-    const maxNeckFold = spine.maxTurnAngle * 1.05;
+    const maxNeckFold = spine.maxTurnAngle * 0.82;
     if (Math.abs(neckDelta) > maxNeckFold) {
       desiredMoveAngle = normalizeAngle(neckForward + Math.sign(neckDelta) * maxNeckFold);
     }
@@ -352,13 +396,13 @@ export function stepSpine(spine: SnakeSpine, opts: StepSpineOptions): void {
   // Ground-referenced path following: record headPivot's exact ground track and pull body
   // segments monotonically along the head's ground coordinates so curves stay pinned to the substrate.
   if (!spine.trail || spine.trail.length === 0) {
-    spine.trail = spine.points.slice(1).map((p) => ({ x: p.x, y: p.y }));
+    spine.trail = buildSmoothTrailFromPoints(spine.points, 6);
   }
 
   if (wasClamped) {
-    // During tight glass wall contact, rely on smooth constraint following and resync the trail
+    // During tight glass wall contact, rely on smooth constraint following and resync a smooth dense trail
     solveDistanceAndAngleConstraints(spine.points, spine.segmentLength, spine.maxTurnAngle);
-    spine.trail = spine.points.slice(1).map((p) => ({ x: p.x, y: p.y }));
+    spine.trail = buildSmoothTrailFromPoints(spine.points, 6);
   } else {
     if (headMoved > 1e-4) {
       const first = spine.trail[0];

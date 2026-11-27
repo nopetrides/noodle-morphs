@@ -293,6 +293,14 @@ export function MiniSnakeCanvas({
           },
         });
       };
+
+      // Pre-simulate enough gentle physics steps (~0.8ms total) to flush the ENTIRE 20-segment
+      // body & ground trail cleanly onto the live stepSpine trajectory (zero startup junction!)
+      const totalBodyLen = spine.segmentLength * (spine.points.length + 2);
+      const warmupSteps = Math.max(180, Math.min(300, Math.ceil((totalBodyLen / 28) * 60)));
+      for (let i = 0; i < warmupSteps; i++) {
+        stepPreview(1 / 60);
+      }
     }
 
     const draw = () => {

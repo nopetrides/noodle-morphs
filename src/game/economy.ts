@@ -13,12 +13,19 @@ import {
   makeGenotype,
   pickCozySnakeName,
 } from './genetics';
+import {
+  getEnabledModLoci,
+  getModLocus,
+  isModSynthesisOnlyLocus,
+} from './modPacks';
 import type {
+  AllelePair,
   EconomyState,
   GeneBiasDistribution,
   HissDepotState,
   InheritanceMode,
   LocusId,
+  ModAlleleMap,
   MorphRarity,
   SnakeEntity,
 } from './types';
@@ -294,6 +301,15 @@ export function evaluateSnakeSaleValue(
       if (tier !== null && tier > maxSynthTier) maxSynthTier = tier;
     }
   }
+  if (snake.modAlleles) {
+    for (const [fullId, pair] of Object.entries(snake.modAlleles)) {
+      const c = countAlleles(pair);
+      const modLoc = getModLocus(fullId);
+      if (!modLoc || c === 0) continue;
+      if (modLoc.spec.mode === 'recessive' && c === 2) recessiveVisuals += 1;
+      if (modLoc.spec.mode === 'codominant' && c === 2) superVisuals += 1;
+    }
+  }
 
   const tierBonus = maxSynthTier > 0 ? maxSynthTier * 20 : 0;
   const comboBonus = recessiveVisuals * 30 + superVisuals * 22 + tierBonus;
@@ -360,6 +376,20 @@ export function analyzeSaleWarnings(
       }
     }
   }
+  if (target.modAlleles) {
+    for (const [fullId, pair] of Object.entries(target.modAlleles)) {
+      if (countAlleles(pair) > 0) {
+        let carriers = 0;
+        for (const s of combined) {
+          if (countAlleles(s.modAlleles?.[fullId] ?? [0, 0]) > 0) carriers += 1;
+        }
+        if (carriers <= 2) {
+          const modName = getModLocus(fullId)?.spec.name ?? fullId;
+          endangeredGenes.push(`${modName} (${carriers} owned)`);
+        }
+      }
+    }
+  }
   if (endangeredGenes.length > 0) {
     reasons.push(`One of your last 2 carriers of: ${endangeredGenes.join(', ')}.`);
   }
@@ -387,25 +417,40 @@ export function analyzeSaleWarnings(
 
 export interface JeanPoolOffer {
   offerId: string;
-  locusId: LocusId;
+  locusId: LocusId | string;
+  locusName: string;
+  locusMode: InheritanceMode;
+  locusDescription: string;
+  isCustom: boolean;
+  packName?: string;
   price: number;
   snake: SnakeEntity;
 }
 
 export function getMissingLoci(
   snakes: SnakeEntity[],
-  contentFlags = DEFAULT_CONTENT_FLAGS
-): LocusId[] {
-  return getEnabledLoci(contentFlags).filter(
+  contentFlags = DEFAULT_CONTENT_FLAGS,
+  enabledModPacks?: string[]
+): Array<LocusId | string> {
+  const missingCore: Array<LocusId | string> = getEnabledLoci(contentFlags).filter(
     (loc) =>
       !isSynthesisOnlyLocus(loc) &&
       snakes.every((s) => countAlleles(s.genotype[loc]) === 0)
   );
+  const missingMods = getEnabledModLoci(enabledModPacks)
+    .filter(
+      (mod) =>
+        !isModSynthesisOnlyLocus(mod.fullId) &&
+        snakes.every((s) => countAlleles(s.modAlleles?.[mod.fullId] ?? [0, 0]) === 0)
+    )
+    .map((m) => m.fullId);
+  return [...missingCore, ...missingMods];
 }
 
-export function getJeanPoolOfferPrice(locusId: LocusId, purchasesCount: number): number {
-  const def = LOCUS_DEFINITIONS[locusId];
-  const modeMult = def.mode === 'recessive' ? 1.3 : def.mode === 'codominant' ? 1.1 : 1.0;
+export function getJeanPoolOfferPrice(locusId: LocusId | string, purchasesCount: number): number {
+  const coreDef = LOCUS_DEFINITIONS[locusId as LocusId];
+  const mode: InheritanceMode = coreDef?.mode ?? getModLocus(locusId)?.spec.mode ?? 'codominant';
+  const modeMult = mode === 'recessive' ? 1.3 : mode === 'codominant' ? 1.1 : 1.0;
   const base = 85 * modeMult;
   return clampUint(Math.round(base * Math.pow(1.45, clampUint(purchasesCount))));
 }
@@ -425,9 +470,10 @@ function seededRng(seed: number): () => number {
 export function buildJeanPoolOffers(
   snakes: SnakeEntity[],
   jeanPool: { purchasesCount: number; stockSeed: number },
-  contentFlags = DEFAULT_CONTENT_FLAGS
+  contentFlags = DEFAULT_CONTENT_FLAGS,
+  enabledModPacks?: string[]
 ): JeanPoolOffer[] {
-  const missing = getMissingLoci(snakes, contentFlags);
+  const missing = getMissingLoci(snakes, contentFlags, enabledModPacks);
   if (missing.length === 0) return [];
 
   const rng = seededRng(jeanPool.stockSeed + jeanPool.purchasesCount * 97);
@@ -442,12 +488,20 @@ export function buildJeanPoolOffers(
   const now = Date.now();
 
   return chosenLoci.map((loc, idx) => {
-    const def = LOCUS_DEFINITIONS[loc];
+    const coreDef = LOCUS_DEFINITIONS[loc as LocusId];
+    const modDef = coreDef ? undefined : getModLocus(loc);
+    const mode: InheritanceMode = coreDef?.mode ?? modDef?.spec.mode ?? 'codominant';
+    const locusName = coreDef?.name ?? modDef?.spec.name ?? loc;
+    const locusDescription = coreDef?.description ?? modDef?.spec.description ?? 'Community gene pack morph.';
+    const isCustom = coreDef ? Boolean(coreDef.isCustom) : true;
+    const packName = modDef?.packName;
+
     // Single missing gene: visual [1,1] for recessive, [1,0] for dominant/codominant
-    const pair: [0 | 1, 0 | 1] = def.mode === 'recessive' ? [1, 1] : [1, 0];
-    const genotype = makeGenotype({ [loc]: pair });
+    const pair: AllelePair = mode === 'recessive' ? [1, 1] : [1, 0];
+    const genotype = coreDef ? makeGenotype({ [loc as LocusId]: pair }) : makeGenotype({});
+    const modAlleles: ModAlleleMap | undefined = modDef ? { [modDef.fullId]: pair } : undefined;
     const polySeed = Number((0.12 + rng() * 0.76).toFixed(4));
-    const phenotype = evaluatePhenotype(genotype, polySeed);
+    const phenotype = evaluatePhenotype(genotype, polySeed, modAlleles);
     const name = pickCozySnakeName(existingNames, rng);
     existingNames.add(name);
     const price = getJeanPoolOfferPrice(loc, jeanPool.purchasesCount);
@@ -456,6 +510,7 @@ export function buildJeanPoolOffers(
       id: `jeanpool_${jeanPool.stockSeed}_${loc}_${idx}`,
       name,
       genotype,
+      ...(modAlleles ? { modAlleles } : {}),
       polygenicSeed: polySeed,
       phenotype,
       currentVigor: phenotype.lineageVigor,
@@ -473,6 +528,11 @@ export function buildJeanPoolOffers(
     return {
       offerId: `offer_${jeanPool.stockSeed}_${loc}`,
       locusId: loc,
+      locusName,
+      locusMode: mode,
+      locusDescription,
+      isCustom,
+      ...(packName ? { packName } : {}),
       price,
       snake,
     };

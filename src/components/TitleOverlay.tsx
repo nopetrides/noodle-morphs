@@ -1,22 +1,26 @@
 import { useState } from 'react';
-import { FolderOpen, LogOut, Play, PlusCircle } from 'lucide-react';
+import { FolderOpen, LogOut, Package, Play, PlusCircle } from 'lucide-react';
 import { getGameModeLabel } from '../game/contentFlags';
 import type { SaveSlotSummary } from '../game/storage';
 
 interface TitleOverlayProps {
   hasSaves: boolean;
   continueSlot: SaveSlotSummary | null;
+  installedPackCount: number;
   onContinue: () => void;
   onNewGame: () => void;
   onLoadGame: () => void;
+  onOpenModPacks: () => void;
 }
 
 export function TitleOverlay({
   hasSaves,
   continueSlot,
+  installedPackCount,
   onContinue,
   onNewGame,
   onLoadGame,
+  onOpenModPacks,
 }: TitleOverlayProps) {
   const [exitNotice, setExitNotice] = useState(false);
 
@@ -175,6 +179,21 @@ export function TitleOverlay({
               <span>Load</span>
             </button>
           )}
+
+          <button
+            type="button"
+            data-testid="title-mod-packs-btn"
+            onClick={onOpenModPacks}
+            className="w-full px-5 py-2.5 rounded-xl bg-[#1E2728]/90 hover:bg-[#263537] text-[#D8F2EE] border border-[#56B8B0]/30 font-medium text-sm transition-all duration-150 cursor-pointer flex items-center justify-between gap-2.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7AE0D4]"
+          >
+            <span className="inline-flex items-center gap-2.5">
+              <Package className="w-4 h-4 text-[#7AE0D4]" aria-hidden="true" />
+              <span>Gene Packs</span>
+            </span>
+            <span className="text-[11px] font-mono-code text-[#9EE8DE] tabular-nums">
+              {installedPackCount > 0 ? `${installedPackCount} installed` : 'Workshop'}
+            </span>
+          </button>
 
           <button
             type="button"

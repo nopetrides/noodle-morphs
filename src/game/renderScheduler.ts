@@ -1,10 +1,15 @@
 import { buildSkinCacheKey, type CachedSkinEntry, globalSkinCache } from './skinCache';
 import {
+  buildSmoothTrailFromPoints,
   getBallPythonRadius,
   normalizeAngle,
   solveDistanceAndAngleConstraints,
 } from './spine';
-import type { SkinWorkerRequest, SkinWorkerResponse } from './skinWorker';
+import type {
+  SkinWorkerMessage,
+  SkinWorkerRequest,
+  SkinWorkerResponse,
+} from './skinWorker';
 import type { SkinDebugStage, SkinPhenotypeSpec, SnakePalette, SnakeSpine, SpinePoint } from './types';
 
 export type RenderPriority = 'high' | 'normal';
@@ -37,6 +42,34 @@ const pendingJobsByKey = new Map<string, PendingJob>();
 const highPriorityQueue: PendingJob[] = [];
 const normalPriorityQueue: PendingJob[] = [];
 let fallbackTimer: number | null = null;
+const syncedWorkerMaps = new Map<string, { width: number; height: number; data: Float32Array }>();
+
+/**
+ * Syncs a registered custom grayscale UV map into the Web Worker pool (and replays it to any
+ * workers spawned later) so Workshop `custom_map` textures render identically off-thread.
+ */
+export function syncGrayscaleMapToWorkers(
+  id: string,
+  width: number,
+  height: number,
+  data: Float32Array
+): void {
+  syncedWorkerMaps.set(id, { width, height, data });
+  if (!workersSupported || workerSlots.length === 0) return;
+  const msg: SkinWorkerMessage = { type: 'register_map', id, width, height, data };
+  for (const slot of workerSlots) {
+    slot.worker.postMessage(msg);
+  }
+}
+
+export function unsyncGrayscaleMapFromWorkers(id: string): void {
+  syncedWorkerMaps.delete(id);
+  if (!workersSupported || workerSlots.length === 0) return;
+  const msg: SkinWorkerMessage = { type: 'unregister_map', id };
+  for (const slot of workerSlots) {
+    slot.worker.postMessage(msg);
+  }
+}
 
 function ensureWorkerPool(): boolean {
   if (workerPoolInitialized) return workersSupported;
@@ -88,6 +121,17 @@ function ensureWorkerPool(): boolean {
         pumpWorkerQueue();
       };
       workerSlots.push(slot);
+      // Replay any already-registered custom grayscale maps to this newly spawned worker
+      for (const [mapId, map] of syncedWorkerMaps.entries()) {
+        const msg: SkinWorkerMessage = {
+          type: 'register_map',
+          id: mapId,
+          width: map.width,
+          height: map.height,
+          data: map.data,
+        };
+        worker.postMessage(msg);
+      }
     }
     workersSupported = workerSlots.length > 0;
   } catch {
@@ -288,8 +332,9 @@ function computeVisualSpineBounds(points: SpinePoint[]): SpineBBox {
  * Generates a unique, natural, personality-rich preview spine deterministically from a snake's seed:
  * - Randomizes facing direction (left/right), body wave polarity, diagonal tilt, S/C-curve frequency,
  *   phase, arch, subtle curious head angle, and safe framing offset inside the card.
- * - Mathematically guarantees the snake stays strictly inside card bounds and never curls/coils up
- *   (longitudinal axis progression stays strictly monotonic with bounded curvature).
+ * - Obeys real ball python joint/curvature limits with a dense Catmull-Rom ground trail and
+ *   phase-synced heading so animated snakes glide smoothly with zero polygonal chugging.
+ * - Mathematically guarantees the snake stays strictly inside card bounds and never curls/coils up.
  */
 export function createSeededPreviewSpine(
   width: number,
@@ -314,39 +359,43 @@ export function createSeededPreviewSpine(
 
   const flipX = seededPoseUnit(seed, 1) < 0.5 ? -1 : 1;
   const flipY = seededPoseUnit(seed, 2) < 0.5 ? -1 : 1;
-  const waves = 1.25 + seededPoseUnit(seed, 3) * 1.1; // 1.25 (sweeping C/S) .. 2.35 (lively S-wave)
+  const waves = 1.2 + seededPoseUnit(seed, 3) * 0.95; // 1.2 (sweeping C/S) .. 2.15 (smooth S-wave)
   const phase = seededPoseUnit(seed, 4) * Math.PI * 2;
-  let amp = 0.42 + seededPoseUnit(seed, 5) * 0.44; // 0.42 .. 0.86 rad
-  let arch = (seededPoseUnit(seed, 6) - 0.5) * 0.64; // -0.32 .. +0.32 rad
-  const headNod = (seededPoseUnit(seed, 7) - 0.5) * 0.42; // -0.21 .. +0.21 rad
+  let amp = 0.34 + seededPoseUnit(seed, 5) * 0.34; // 0.34 .. 0.68 rad (matches live slither curvature)
+  let arch = (seededPoseUnit(seed, 6) - 0.5) * 0.48; // -0.24 .. +0.24 rad
   // Keep diagonal tilt gentler on very wide/short aspect ratios
   const aspect = width / Math.max(1, height);
   const maxTilt = aspect > 2.4 ? 0.24 : 0.36;
   let tilt = (seededPoseUnit(seed, 8) - 0.5) * 2 * maxTilt;
   const offsetUnitX = seededPoseUnit(seed, 9) - 0.5;
   const offsetUnitY = seededPoseUnit(seed, 10) - 0.5;
-  const upsideDownNudge = isUpsideDown ? 0.08 : 0;
+  const upsideDownNudge = isUpsideDown ? 0.06 : 0;
 
   const buildCandidatePoints = (curAmp: number, curArch: number, curTilt: number): SpinePoint[] => {
     const localPts: Array<{ x: number; y: number }> = new Array(segCount);
-    // Node 1 = head pivot at origin; Node 0 = rigid snout ahead along headNod
+    const maxDev = 0.74; // cos(0.74) >= 0.738 -> strictly monotonic, impossible to curl up!
+    const maxStep = 0.22; // matches real stepSpine per-segment curvature limit (<= 0.46 * 0.5)
+
+    // Evaluate continuous head tangent right at u = 0 so snout -> head -> neck has zero angular break
+    const headAlpha = clampVal(
+      curAmp * Math.sin(phase) + (curArch + upsideDownNudge) * -0.5,
+      -maxDev * 0.85,
+      maxDev * 0.85
+    );
+
     localPts[1] = { x: 0, y: 0 };
     localPts[0] = {
-      x: Math.cos(headNod) * segLen,
-      y: Math.sin(headNod) * segLen,
+      x: Math.cos(headAlpha) * segLen,
+      y: Math.sin(headAlpha) * segLen,
     };
 
-    let prevAlpha = headNod;
-    const maxDev = 0.88; // cos(0.88) >= 0.637 -> strictly monotonic progression, impossible to curl up!
-    const maxStep = 0.34; // safely inside spine maxTurnAngle (0.46)
-
+    let prevAlpha = headAlpha;
     for (let k = 1; k <= segCount - 2; k++) {
       const i = k + 1;
       const u = k / (segCount - 2);
       const rawAlpha =
         curAmp * Math.sin(u * Math.PI * waves + phase) +
-        (curArch + upsideDownNudge) * (u - 0.5) +
-        headNod * Math.exp(-u * 4.8);
+        (curArch + upsideDownNudge) * (u - 0.5);
       const clampedAlpha = clampVal(rawAlpha, -maxDev, maxDev);
       const alpha = prevAlpha + clampVal(clampedAlpha - prevAlpha, -maxStep, maxStep);
       prevAlpha = alpha;
@@ -432,15 +481,19 @@ export function createSeededPreviewSpine(
     points[i].y += dy;
   }
 
-  const trail = points.slice(1).map((p) => ({ x: p.x, y: p.y }));
+  // Sync heading to the natural forward body axis & slitherPhase to the head's current weave offset
+  const baseAxisAngle = normalizeAngle((flipX < 0 ? Math.PI : 0) + tilt);
+  const headWeaveDelta = normalizeAngle(points[1].angle - baseAxisAngle);
+  const syncedSlitherPhase = Math.asin(clampVal(headWeaveDelta / 0.52, -0.92, 0.92));
+
   return {
     points,
-    trail,
+    trail: buildSmoothTrailFromPoints(points, 6),
     segmentLength: segLen,
     baseRadius: baseRad,
     maxTurnAngle: 0.46,
-    heading: points[1].angle,
-    slitherPhase: seededPoseUnit(seed, 11) * Math.PI * 2,
+    heading: baseAxisAngle,
+    slitherPhase: syncedSlitherPhase,
     tongueTimer: 1.5 + seededPoseUnit(seed, 12) * 3.5,
     tongueActive: 0,
     wobblePhase: seededPoseUnit(seed, 13) * Math.PI * 2,
@@ -454,7 +507,8 @@ export interface SeededWanderOrbit {
 
 /**
  * Creates a unique, smoothly precessing Lissajous wander orbit derived deterministically from a
- * snake's seed so animated snakes in the same modal/clutch explore distinct paths and tempos.
+ * snake's seed so animated snakes in the same modal/clutch explore distinct paths and tempos
+ * while staying comfortably inside stepSpine's wall-avoidance corridor (preventing hard wall clamps).
  */
 export function createSeededWanderOrbit(
   width: number,
@@ -462,34 +516,37 @@ export function createSeededWanderOrbit(
   seed: number,
   initialHeading = 0
 ): SeededWanderOrbit {
-  const marginX = clampVal(width * 0.14, 12, 34);
-  const marginY = clampVal(height * 0.18, 10, 26);
+  // Keep targets inside stepSpine's safe wall corridor so animated previews glide smoothly without clamping
+  const marginX = clampVal(width * 0.16, 18, 40);
+  const marginY = clampVal(height * 0.30, 14, 34);
 
-  const centerX = width * (0.45 + seededPoseUnit(seed, 21) * 0.1);
-  const centerY = height * (0.46 + seededPoseUnit(seed, 22) * 0.1);
-  const rx = width * (0.21 + seededPoseUnit(seed, 23) * 0.11);
-  const ry = height * (0.14 + seededPoseUnit(seed, 24) * 0.11);
+  const centerX = width * (0.46 + seededPoseUnit(seed, 21) * 0.08);
+  const centerY = height * (0.47 + seededPoseUnit(seed, 22) * 0.06);
+  const maxRx = Math.max(8, Math.min(centerX - marginX, width - marginX - centerX));
+  const maxRy = Math.max(4, Math.min(centerY - marginY, height - marginY - centerY));
+  const rx = maxRx * (0.72 + seededPoseUnit(seed, 23) * 0.25);
+  const ry = maxRy * (0.65 + seededPoseUnit(seed, 24) * 0.32);
 
-  const angularSpeed = 0.72 + seededPoseUnit(seed, 25) * 0.44;
-  const freqY = 1.25 + seededPoseUnit(seed, 26) * 1.15;
+  const angularSpeed = 0.65 + seededPoseUnit(seed, 25) * 0.38;
+  const freqY = 1.25 + seededPoseUnit(seed, 26) * 1.1;
   const dirX = seededPoseUnit(seed, 27) < 0.5 ? 1 : -1;
   const dirY = seededPoseUnit(seed, 28) < 0.5 ? 1 : -1;
   const driftPhase = seededPoseUnit(seed, 29) * Math.PI * 2;
-  const driftRate = 0.23 + seededPoseUnit(seed, 30) * 0.19;
-  const speed = 29 + seededPoseUnit(seed, 31) * 14;
+  const driftRate = 0.22 + seededPoseUnit(seed, 30) * 0.18;
+  const speed = 29 + seededPoseUnit(seed, 31) * 13;
 
   // Bias t=0 target broadly ahead of the snake's seeded starting heading, with seeded divergence
-  const aimAngle = initialHeading + (seededPoseUnit(seed, 32) - 0.5) * 0.9;
+  const aimAngle = initialHeading + (seededPoseUnit(seed, 32) - 0.5) * 0.85;
   const phaseX0 = Math.atan2(Math.sin(aimAngle), Math.cos(aimAngle));
   const phaseY0 =
     Math.asin(clampVal(Math.sin(aimAngle), -0.95, 0.95)) +
-    (seededPoseUnit(seed, 33) - 0.5) * 0.9;
+    (seededPoseUnit(seed, 33) - 0.5) * 0.85;
 
   return {
     sample: (t: number) => {
       const px = phaseX0 + t * angularSpeed * dirX;
       const py = phaseY0 + t * angularSpeed * freqY * dirY;
-      const drift = Math.sin(driftPhase + t * driftRate) * 0.18;
+      const drift = Math.sin(driftPhase + t * driftRate) * 0.16;
       const targetX = clampVal(centerX + Math.cos(px + drift) * rx, marginX, width - marginX);
       const targetY = clampVal(centerY + Math.sin(py - drift * 0.7) * ry, marginY, height - marginY);
       return { targetX, targetY, speed };

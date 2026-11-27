@@ -30,10 +30,18 @@ export function countUndiscoveredChildren(
   candidate: SnakeEntity,
   partner: SnakeEntity | null | undefined,
   discoveredKeys: Set<string>,
-  contentFlags = DEFAULT_CONTENT_FLAGS
+  contentFlags = DEFAULT_CONTENT_FLAGS,
+  enabledModPacks?: string[]
 ): number {
   if (!partner || candidate.id === partner.id) return 0;
-  const preview = computeBreedingPreview(candidate, partner, discoveredKeys, undefined, contentFlags);
+  const preview = computeBreedingPreview(
+    candidate,
+    partner,
+    discoveredKeys,
+    undefined,
+    contentFlags,
+    enabledModPacks
+  );
   let count = 0;
   for (const entry of preview) {
     if (!entry.isDiscovered) count += 1;
@@ -48,11 +56,15 @@ export function buildUndiscoveredChildrenMap(
   snakes: SnakeEntity[],
   partner: SnakeEntity | null | undefined,
   discoveredKeys: Set<string>,
-  contentFlags = DEFAULT_CONTENT_FLAGS
+  contentFlags = DEFAULT_CONTENT_FLAGS,
+  enabledModPacks?: string[]
 ): Map<string, number> {
   const map = new Map<string, number>();
   for (const snake of snakes) {
-    map.set(snake.id, countUndiscoveredChildren(snake, partner, discoveredKeys, contentFlags));
+    map.set(
+      snake.id,
+      countUndiscoveredChildren(snake, partner, discoveredKeys, contentFlags, enabledModPacks)
+    );
   }
   return map;
 }

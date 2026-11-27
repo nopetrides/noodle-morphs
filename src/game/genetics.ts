@@ -7,10 +7,20 @@ import {
   applyAutomaticSynthesis,
   ELEMENTAL_LOCI_ORDER,
   ELEMENTAL_LOCUS_DEFINITIONS,
+  ELEMENTAL_SYNTHESIS_RECIPES,
   ELEMENTAL_VISUAL_PROFILES,
   getElementalTier,
   isSynthesisOnlyLocus,
 } from './elementalSynthesis';
+import {
+  applyModSynthesis,
+  buildModFieldContribution,
+  cleanModAlleles,
+  getEnabledModLoci,
+  getEnabledModRecipes,
+  getModLocus,
+  isModSynthesisOnlyLocus,
+} from './modPacks';
 import { clamp, createDefaultSkinFieldParams, SKIN_GENERATOR_VERSION } from './skinField';
 import type {
   AllelePair,
@@ -24,6 +34,7 @@ import type {
   InheritanceMode,
   LocusDefinition,
   LocusId,
+  ModAlleleMap,
   MorphDiscovery,
   MorphRarity,
   MorphTag,
@@ -1060,7 +1071,11 @@ function removeMelaninColor(
  * 3) Melanin & xanthophore filters (Axanthic, Hypo, Ultramel, Desert Ghost, Albino, Lavender Albino, Leucistic)
  * 4) Chromatic Inversion (flips every final RGB color regardless of prior layers)
  */
-function derivePalette(genotype: Genotype, polygenicSeed = 0.5): SnakePalette {
+function derivePalette(
+  genotype: Genotype,
+  polygenicSeed = 0.5,
+  modAlleles?: ModAlleleMap
+): SnakePalette {
   const bel = isBlueEyedLeucistic(genotype);
   const blackEl = isBlackEyedLeucistic(genotype);
   const ivory = isIvory(genotype);
@@ -1428,7 +1443,7 @@ function derivePalette(genotype: Genotype, polygenicSeed = 0.5): SnakePalette {
   const hasOpaquePartner =
     hasPriorPigment || magma >= 1 || tidal >= 1 || banana >= 1 || activeElementals.length > translucentCount;
   const rawOpacity = translucentCount > 0 ? translucentSum / translucentCount : 1;
-  const bodyOpacity =
+  let bodyOpacity =
     translucentCount > 0
       ? clamp(hasOpaquePartner ? rawOpacity * 0.68 + 0.32 : rawOpacity, 0.28, 1)
       : 1;
@@ -1487,6 +1502,37 @@ function derivePalette(genotype: Genotype, polygenicSeed = 0.5): SnakePalette {
 
   if (monarch && !albino && !lavenderAlbino) {
     addPigmentVoice('#8E6F9E', 0.62);
+  }
+
+  // Blend active visual Workshop / local Gene Pack palettes BEFORE melanin/albino/invert filters
+  if (modAlleles) {
+    const modEntries = Object.entries(modAlleles).sort(([a], [b]) => a.localeCompare(b));
+    for (const [fullId, pair] of modEntries) {
+      const count = countAlleles(pair);
+      if (count === 0) continue;
+      const modLoc = getModLocus(fullId);
+      if (!modLoc) continue;
+      const { spec } = modLoc;
+      if (spec.mode === 'recessive' && count < 2) continue;
+      const pal = count === 2 && spec.palette2x ? spec.palette2x : spec.palette1x;
+      const w = clamp(pal.pigmentWeight ?? (count === 2 ? 0.88 : 0.76), 0.2, 1);
+      const secW = clamp(w * 0.88, 0.2, 0.95);
+      base = mixHex(base, pal.base, w);
+      patternPrimary = mixHex(patternPrimary, pal.patternPrimary, secW);
+      if (pal.patternSecondary) {
+        patternSecondary = mixHex(patternSecondary, pal.patternSecondary, secW);
+      }
+      if (pal.accentColor) {
+        accentColor = accentColor ? mixHex(accentColor, pal.accentColor, 0.55) : pal.accentColor;
+      }
+      if (pal.belly) belly = mixHex(belly, pal.belly, w * 0.8);
+      if (pal.outline) outline = mixHex(outline, pal.outline, w * 0.75);
+      if (pal.eyeIris) eyeIris = mixHex(eyeIris, pal.eyeIris, w * 0.8);
+      if (typeof pal.bodyOpacity === 'number' && pal.bodyOpacity < bodyOpacity) {
+        bodyOpacity = clamp(pal.bodyOpacity, 0.45, 1);
+      }
+      pigmentVoices.push({ hex: pal.base, weight: w });
+    }
   }
 
   // Emergent dual-pigment "mixed paint" mottling: whenever two opposing/distant chromatic pigment voices
@@ -1763,7 +1809,8 @@ function derivePalette(genotype: Genotype, polygenicSeed = 0.5): SnakePalette {
  */
 export function deriveSkinPhenotypeSpec(
   genotype: Genotype,
-  polygenicSeed = 0.5
+  polygenicSeed = 0.5,
+  modAlleles?: ModAlleleMap
 ): SkinPhenotypeSpec {
   const params = createDefaultSkinFieldParams();
   const contributions: FieldContribution[] = [];
@@ -2480,6 +2527,40 @@ export function deriveSkinPhenotypeSpec(
     });
   }
 
+  // Apply active visual Workshop / local Gene Pack scalar field contributions & custom UV textures
+  let customMapId: string | undefined;
+  if (modAlleles) {
+    const modEntries = Object.entries(modAlleles).sort(([a], [b]) => a.localeCompare(b));
+    for (const [fullId, pair] of modEntries) {
+      const count = countAlleles(pair);
+      if (count === 0) continue;
+      const modLoc = getModLocus(fullId);
+      if (!modLoc) continue;
+      const { spec } = modLoc;
+      if (spec.mode === 'recessive' && count < 2) continue;
+      const fieldSpec = count === 2 && spec.field2x ? spec.field2x : spec.field1x;
+      const built = buildModFieldContribution(modLoc.packId, fieldSpec);
+      contributions.push(built.contribution);
+      if (built.customMapId) customMapId = built.customMapId;
+      if (fieldSpec.paramOverrides) {
+        const po = fieldSpec.paramOverrides;
+        if (typeof po.coverage === 'number') params.coverage = params.coverage * 0.35 + po.coverage * 0.65;
+        if (typeof po.frequency === 'number') params.frequency = params.frequency * 0.35 + po.frequency * 0.65;
+        if (typeof po.aspectRatio === 'number') params.aspectRatio = params.aspectRatio * 0.35 + po.aspectRatio * 0.65;
+        if (typeof po.warpStrength === 'number') params.warpStrength = Math.max(params.warpStrength, po.warpStrength);
+        if (typeof po.blush === 'number') params.blush = Math.max(params.blush, po.blush);
+        if (typeof po.flankFlame === 'number') params.flankFlame = Math.max(params.flankFlame, po.flankFlame);
+        if (typeof po.speckleAmount === 'number') params.speckleAmount = Math.max(params.speckleAmount, po.speckleAmount);
+        if (typeof po.calicoRise === 'number') params.calicoRise = Math.max(params.calicoRise, po.calicoRise);
+        if (typeof po.piebaldAmount === 'number') params.piebaldAmount = Math.max(params.piebaldAmount, po.piebaldAmount);
+        if (typeof po.scaleRelief === 'number') params.scaleRelief = Math.max(params.scaleRelief, po.scaleRelief);
+        if (typeof po.accentBandStrength === 'number') {
+          params.accentBandStrength = Math.max(params.accentBandStrength, po.accentBandStrength);
+        }
+      }
+    }
+  }
+
   // Post-morph individual expression nudge so even fixed-target morphs (Monsoon, Stripes, Clown, etc.)
   // exhibit authentic low-to-high polygenic individuality across seeds without changing morph identity
   if (!bel && !blackEl && !ivory) {
@@ -2528,6 +2609,7 @@ export function deriveSkinPhenotypeSpec(
     generatorVersion: SKIN_GENERATOR_VERSION,
     params,
     contributions,
+    ...(customMapId ? { customMapId } : {}),
   };
 }
 
@@ -2611,7 +2693,11 @@ export function resolveSkinSpecForPhenotype(phenotype: SnakePhenotype): SkinPhen
   };
 }
 
-export function evaluatePhenotype(genotype: Genotype, polygenicSeed = 0.5): SnakePhenotype {
+export function evaluatePhenotype(
+  genotype: Genotype,
+  polygenicSeed = 0.5,
+  modAlleles?: ModAlleleMap
+): SnakePhenotype {
   const bel = isBlueEyedLeucistic(genotype);
   const blackEl = isBlackEyedLeucistic(genotype);
   const ivory = isIvory(genotype);
@@ -2989,6 +3075,39 @@ export function evaluatePhenotype(genotype: Genotype, polygenicSeed = 0.5): Snak
     }
   }
 
+  // Evaluate active Workshop / local Gene Pack loci (gracefully skips uninstalled packs)
+  let modRecessiveVisuals = 0;
+  let modSupers = 0;
+  if (modAlleles) {
+    const modEntries = Object.entries(modAlleles).sort(([a], [b]) => a.localeCompare(b));
+    for (const [fullId, pair] of modEntries) {
+      const c = countAlleles(pair);
+      if (c === 0) continue;
+      const modLoc = getModLocus(fullId);
+      if (!modLoc) continue;
+      const { spec } = modLoc;
+      if (spec.mode === 'recessive') {
+        if (c === 2) {
+          visualGenes.push(spec.name);
+          for (const t of spec.tags) tagSet.add(t);
+          tagSet.add('Custom');
+          modRecessiveVisuals += 1;
+        } else {
+          hetGenes.push(spec.name);
+        }
+      } else if (spec.mode === 'codominant' && c === 2) {
+        visualGenes.push(spec.superName ?? `Super ${spec.name}`);
+        for (const t of spec.tags) tagSet.add(t);
+        tagSet.add('Custom');
+        modSupers += 1;
+      } else {
+        visualGenes.push(spec.name);
+        for (const t of spec.tags) tagSet.add(t);
+        tagSet.add('Custom');
+      }
+    }
+  }
+
   const morphName = visualGenes.length > 0 ? visualGenes.join(' ') : 'Classic Normal';
   const morphKey =
     visualGenes.length > 0
@@ -3089,7 +3208,8 @@ export function evaluatePhenotype(genotype: Genotype, polygenicSeed = 0.5): Snak
     (hypo === 2 ? 1 : 0) +
     (ultramel === 2 ? 1 : 0) +
     (raindrop === 2 ? 1 : 0) +
-    elementalRecessiveVisuals;
+    elementalRecessiveVisuals +
+    modRecessiveVisuals;
   const superCount =
     (pastel === 2 ? 1 : 0) +
     (enchi === 2 ? 1 : 0) +
@@ -3106,7 +3226,8 @@ export function evaluatePhenotype(genotype: Genotype, polygenicSeed = 0.5): Snak
     (ivory ? 1 : 0) +
     (eightBall ? 1 : 0) +
     (cobblestone ? 1 : 0) +
-    elementalSupers;
+    elementalSupers +
+    modSupers;
 
   let rarity: MorphRarity = 'common';
   if (
@@ -3131,9 +3252,9 @@ export function evaluatePhenotype(genotype: Genotype, polygenicSeed = 0.5): Snak
     rarity = 'common';
   }
 
-  const palette = derivePalette(genotype, polygenicSeed);
+  const palette = derivePalette(genotype, polygenicSeed, modAlleles);
   const patternRule = derivePatternRule(genotype, polygenicSeed);
-  const skinSpec = deriveSkinPhenotypeSpec(genotype, polygenicSeed);
+  const skinSpec = deriveSkinPhenotypeSpec(genotype, polygenicSeed, modAlleles);
   const isCustomMorph = tagSet.has('Custom') || patternRule.isCustomPattern;
 
   return {
@@ -3222,14 +3343,26 @@ export function computeBreedingPreview(
   dam: SnakeEntity,
   discoveredKeys: Set<string> = new Set(),
   bias?: GeneBiasDistribution,
-  contentFlags = DEFAULT_CONTENT_FLAGS
+  contentFlags = DEFAULT_CONTENT_FLAGS,
+  enabledModPacks?: string[]
 ): BreedingOddsEntry[] {
   const activeLoci = LOCI_ORDER.filter(
     (loc) => countAlleles(sire.genotype[loc]) > 0 || countAlleles(dam.genotype[loc]) > 0
   );
 
+  // Collect polymorphic Workshop / local Gene Pack loci present on either parent
+  const modKeySet = new Set<string>();
+  for (const k of Object.keys(sire.modAlleles ?? {})) {
+    if (countAlleles(sire.modAlleles?.[k] ?? [0, 0]) > 0 && getModLocus(k)) modKeySet.add(k);
+  }
+  for (const k of Object.keys(dam.modAlleles ?? {})) {
+    if (countAlleles(dam.modAlleles?.[k] ?? [0, 0]) > 0 && getModLocus(k)) modKeySet.add(k);
+  }
+  const activeModLoci = Array.from(modKeySet).sort();
+
   interface PartialOutcome {
     genotype: Genotype;
+    modAlleles?: ModAlleleMap;
     prob: number;
   }
 
@@ -3251,6 +3384,36 @@ export function computeBreedingPreview(
         if (p > 0) {
           next.push({
             genotype: { ...item.genotype, [loc]: pair },
+            modAlleles: item.modAlleles,
+            prob: item.prob * p,
+          });
+        }
+      }
+    }
+    outcomes = next;
+  }
+
+  for (const fullId of activeModLoci) {
+    const modDef = getModLocus(fullId)!;
+    const pPass = getTransmissionProbForMode(modDef.spec.mode, bias);
+    const sirePair: AllelePair = sire.modAlleles?.[fullId] ?? [0, 0];
+    const damPair: AllelePair = dam.modAlleles?.[fullId] ?? [0, 0];
+    const dist = crossLocusDistribution(sirePair, damPair, pPass);
+    const next: PartialOutcome[] = [];
+    for (const item of outcomes) {
+      const pairs: Array<[0 | 1 | 2, AllelePair]> = [
+        [0, [0, 0]],
+        [1, [1, 0]],
+        [2, [1, 1]],
+      ];
+      for (const [count, pair] of pairs) {
+        const p = dist[count];
+        if (p > 0) {
+          const nextMod: ModAlleleMap | undefined =
+            count > 0 ? { ...(item.modAlleles ?? {}), [fullId]: pair } : item.modAlleles;
+          next.push({
+            genotype: item.genotype,
+            modAlleles: nextMod,
             prob: item.prob * p,
           });
         }
@@ -3269,41 +3432,67 @@ export function computeBreedingPreview(
       includesUpsideDown: boolean;
       outcomeKind: BreedingOutcomeKind;
       synthesisTier?: number;
-      synthesisResultLocus?: LocusId;
+      synthesisResultLocus?: LocusId | string;
     }
   >();
 
   for (const out of outcomes) {
     // Automatic (100%) elemental synthesis when CustomMorphs is enabled; bypassed cleanly when disabled
-    const { genotype: resolvedGeno, recipe } = applyAutomaticSynthesis(
+    const coreSynth = applyAutomaticSynthesis(
       out.genotype,
       sire.genotype,
       dam.genotype,
       contentFlags
     );
-    const pheno = evaluatePhenotype(resolvedGeno, 0.5);
+    const modSynth = applyModSynthesis(
+      coreSynth.genotype,
+      out.modAlleles,
+      sire.genotype,
+      sire.modAlleles,
+      dam.genotype,
+      dam.modAlleles,
+      enabledModPacks
+    );
+    const resolvedGeno = modSynth.genotype;
+    const resolvedMod = modSynth.modAlleles;
+    const pheno = evaluatePhenotype(resolvedGeno, 0.5, resolvedMod);
 
     let bucketKey = pheno.morphKey;
     let displayMorphName = pheno.morphName;
     let outcomeKind: BreedingOutcomeKind = 'mix';
     let synthesisTier: number | undefined;
-    let synthesisResultLocus: LocusId | undefined;
+    let synthesisResultLocus: LocusId | string | undefined;
 
-    if (recipe) {
+    if (modSynth.recipe) {
       outcomeKind = 'synthesis';
-      synthesisTier = recipe.tier;
-      synthesisResultLocus = recipe.result;
-      const resultDef = LOCUS_DEFINITIONS[recipe.result];
-      const resultCount = countAlleles(resolvedGeno[recipe.result]);
+      synthesisTier = modSynth.recipe.tier;
+      synthesisResultLocus = modSynth.recipe.resultFullId;
+      const modRes = getModLocus(modSynth.recipe.resultFullId);
+      const resCount = countAlleles(resolvedMod?.[modSynth.recipe.resultFullId] ?? [0, 0]);
+      if (modRes && modRes.spec.mode === 'recessive' && resCount === 1) {
+        bucketKey = `synth:${modSynth.recipe.resultFullId}:het:${pheno.morphKey}`;
+        displayMorphName =
+          pheno.morphKey === 'normal'
+            ? `Het ${modRes.spec.name}`
+            : `${pheno.morphName} (Het ${modRes.spec.name})`;
+      } else {
+        bucketKey = `synth:${modSynth.recipe.resultFullId}:${pheno.morphKey}`;
+      }
+    } else if (coreSynth.recipe) {
+      outcomeKind = 'synthesis';
+      synthesisTier = coreSynth.recipe.tier;
+      synthesisResultLocus = coreSynth.recipe.result;
+      const resultDef = LOCUS_DEFINITIONS[coreSynth.recipe.result];
+      const resultCount = countAlleles(resolvedGeno[coreSynth.recipe.result]);
       if (resultDef.mode === 'recessive' && resultCount === 1) {
         // Keep recessive Het syntheses distinct from Classic Normal so players see the Synthesis callout!
-        bucketKey = `synth:${recipe.result}:het:${pheno.morphKey}`;
+        bucketKey = `synth:${coreSynth.recipe.result}:het:${pheno.morphKey}`;
         displayMorphName =
           pheno.morphKey === 'normal'
             ? `Het ${resultDef.name}`
             : `${pheno.morphName} (Het ${resultDef.name})`;
       } else {
-        bucketKey = `synth:${recipe.result}:${pheno.morphKey}`;
+        bucketKey = `synth:${coreSynth.recipe.result}:${pheno.morphKey}`;
       }
     } else if (
       isBlueEyedLeucistic(resolvedGeno) ||
@@ -3321,7 +3510,7 @@ export function computeBreedingPreview(
       existing.probability += out.prob;
     } else {
       byMorph.set(bucketKey, {
-        morphKey: recipe ? pheno.morphKey : bucketKey,
+        morphKey: coreSynth.recipe || modSynth.recipe ? pheno.morphKey : bucketKey,
         morphName: displayMorphName,
         probability: out.prob,
         rarity: pheno.rarity,
@@ -3336,9 +3525,12 @@ export function computeBreedingPreview(
   return Array.from(byMorph.values())
     .sort((a, b) => b.probability - a.probability)
     .map((entry) => {
-      const resultKey = entry.synthesisResultLocus
-        ? LOCUS_DEFINITIONS[entry.synthesisResultLocus].name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+      const resultName = entry.synthesisResultLocus
+        ? LOCUS_DEFINITIONS[entry.synthesisResultLocus as LocusId]?.name ??
+          getModLocus(entry.synthesisResultLocus)?.spec.name ??
+          null
         : null;
+      const resultKey = resultName ? resultName.toLowerCase().replace(/[^a-z0-9]+/g, '-') : null;
       const isDiscovered =
         entry.outcomeKind === 'synthesis' && resultKey
           ? discoveredKeys.has(entry.morphKey) && (entry.morphKey !== 'normal' || discoveredKeys.has(resultKey))
@@ -3409,9 +3601,17 @@ export function breedClutch(
   clutchSize = 2,
   rng: () => number = Math.random,
   bias?: GeneBiasDistribution,
-  contentFlags = DEFAULT_CONTENT_FLAGS
+  contentFlags = DEFAULT_CONTENT_FLAGS,
+  enabledModPacks?: string[]
 ): ClutchEgg[] {
-  const preview = computeBreedingPreview(sire, dam, discoveredKeys, bias, contentFlags);
+  const preview = computeBreedingPreview(
+    sire,
+    dam,
+    discoveredKeys,
+    bias,
+    contentFlags,
+    enabledModPacks
+  );
   const probByMorphKey = new Map<string, number>();
   for (const e of preview) {
     probByMorphKey.set(e.morphKey, (probByMorphKey.get(e.morphKey) ?? 0) + e.probability);
@@ -3420,6 +3620,16 @@ export function breedClutch(
   const clutchDiscoveredKeys = new Set(discoveredKeys);
   const enabledLoci = getEnabledLoci(contentFlags);
   const mutatableLoci = enabledLoci.filter((loc) => !isSynthesisOnlyLocus(loc));
+  const enabledModLoci = getEnabledModLoci(enabledModPacks);
+  const mutatableModLoci = enabledModLoci.filter((m) => !isModSynthesisOnlyLocus(m.fullId));
+
+  const parentModKeys = Array.from(
+    new Set<string>([
+      ...Object.keys(sire.modAlleles ?? {}),
+      ...Object.keys(dam.modAlleles ?? {}),
+    ])
+  ).sort();
+
   const eggs: ClutchEgg[] = [];
   const now = Date.now();
 
@@ -3433,7 +3643,7 @@ export function breedClutch(
   for (let i = 0; i < clutchSize; i++) {
     let childGenotype = createWildTypeGenotype();
 
-    // Mendelian inheritance per locus (with optional Hiss Depot category balance)
+    // Mendelian inheritance per core locus (with optional Hiss Depot category balance)
     for (const loc of LOCI_ORDER) {
       const pPass = getTransmissionProbForMode(LOCUS_DEFINITIONS[loc].mode, bias);
       const sireAllele = drawParentAllele(sire.genotype[loc], pPass);
@@ -3441,33 +3651,88 @@ export function breedClutch(
       childGenotype[loc] = normalizeAllelePair(sireAllele, damAllele);
     }
 
-    // Automatic (100%) elemental synthesis when CustomMorphs is enabled; bypassed when disabled
-    const synth = applyAutomaticSynthesis(childGenotype, sire.genotype, dam.genotype, contentFlags);
-    childGenotype = synth.genotype;
-    const wasSynthesis = synth.recipe !== null;
-    const synthesisLocusName = synth.recipe ? LOCUS_DEFINITIONS[synth.recipe.result].name : null;
-    const synthesisTier = synth.recipe?.tier;
+    // Mendelian inheritance per Workshop / local Gene Pack locus carried by parents
+    let childModAlleles: ModAlleleMap | undefined;
+    if (parentModKeys.length > 0) {
+      const nextMod: ModAlleleMap = {};
+      for (const fullId of parentModKeys) {
+        const modDef = getModLocus(fullId);
+        const mode: InheritanceMode = modDef?.spec.mode ?? 'codominant';
+        const pPass = getTransmissionProbForMode(mode, bias);
+        const sireAllele = drawParentAllele(sire.modAlleles?.[fullId] ?? [0, 0], pPass);
+        const damAllele = drawParentAllele(dam.modAlleles?.[fullId] ?? [0, 0], pPass);
+        const pair = normalizeAllelePair(sireAllele, damAllele);
+        if (countAlleles(pair) > 0) nextMod[fullId] = pair;
+      }
+      childModAlleles = cleanModAlleles(nextMod);
+    }
+
+    // Automatic (100%) elemental & Workshop mod synthesis
+    const coreSynth = applyAutomaticSynthesis(childGenotype, sire.genotype, dam.genotype, contentFlags);
+    const modSynth = applyModSynthesis(
+      coreSynth.genotype,
+      childModAlleles,
+      sire.genotype,
+      sire.modAlleles,
+      dam.genotype,
+      dam.modAlleles,
+      enabledModPacks
+    );
+    childGenotype = modSynth.genotype;
+    childModAlleles = modSynth.modAlleles;
+
+    const wasSynthesis = modSynth.recipe !== null || coreSynth.recipe !== null;
+    const synthesisLocusName = modSynth.recipe
+      ? getModLocus(modSynth.recipe.resultFullId)?.spec.name ?? modSynth.recipe.name
+      : coreSynth.recipe
+        ? LOCUS_DEFINITIONS[coreSynth.recipe.result].name
+        : null;
+    const synthesisTier = modSynth.recipe?.tier ?? coreSynth.recipe?.tier;
 
     // Gentle spontaneous mutation roll weighted by gene bias if set (strictly non-synthesis enabled loci)
     let wasMutation = false;
     let mutationLocusName: string | null = null;
     if (rng() < MUTATION_CHANCE_PER_EGG) {
-      const candidates = mutatableLoci.filter((loc) => {
+      const coreCandidates = mutatableLoci.filter((loc) => {
         const current = countAlleles(childGenotype[loc]);
-        // Never mutate into homozygous lethal Super Spider
         if (loc === 'spider' && current >= 1) return false;
         return current < 2;
       });
-      if (candidates.length > 0) {
-        const chosen = pickWeightedMutationLocus(candidates, bias, rng);
-        const current = countAlleles(childGenotype[chosen]);
-        if (LOCUS_DEFINITIONS[chosen].mode === 'recessive' && current === 0) {
-          childGenotype[chosen] = rng() < 0.35 ? [1, 1] : [1, 0];
-        } else {
-          childGenotype[chosen] = current === 0 ? [1, 0] : [1, 1];
+      const modCandidates = mutatableModLoci.filter(
+        (m) => countAlleles(childModAlleles?.[m.fullId] ?? [0, 0]) < 2
+      );
+      const totalPool = coreCandidates.length + modCandidates.length;
+      if (totalPool > 0) {
+        const pickMod =
+          modCandidates.length > 0 && rng() < modCandidates.length / totalPool;
+        if (pickMod) {
+          const chosenMod = modCandidates[Math.floor(rng() * modCandidates.length)];
+          const current = countAlleles(childModAlleles?.[chosenMod.fullId] ?? [0, 0]);
+          const nextPair: AllelePair =
+            chosenMod.spec.mode === 'recessive' && current === 0
+              ? rng() < 0.35
+                ? [1, 1]
+                : [1, 0]
+              : current === 0
+                ? [1, 0]
+                : [1, 1];
+          childModAlleles = cleanModAlleles({
+            ...(childModAlleles ?? {}),
+            [chosenMod.fullId]: nextPair,
+          });
+          wasMutation = true;
+          mutationLocusName = chosenMod.spec.name;
+        } else if (coreCandidates.length > 0) {
+          const chosen = pickWeightedMutationLocus(coreCandidates, bias, rng);
+          const current = countAlleles(childGenotype[chosen]);
+          if (LOCUS_DEFINITIONS[chosen].mode === 'recessive' && current === 0) {
+            childGenotype[chosen] = rng() < 0.35 ? [1, 1] : [1, 0];
+          } else {
+            childGenotype[chosen] = current === 0 ? [1, 0] : [1, 1];
+          }
+          wasMutation = true;
+          mutationLocusName = LOCUS_DEFINITIONS[chosen].name;
         }
-        wasMutation = true;
-        mutationLocusName = LOCUS_DEFINITIONS[chosen].name;
       }
     }
 
@@ -3477,13 +3742,15 @@ export function breedClutch(
     }
 
     const polygenicSeed = rng();
-    const phenotype = evaluatePhenotype(childGenotype, polygenicSeed);
+    const phenotype = evaluatePhenotype(childGenotype, polygenicSeed, childModAlleles);
 
     const mendelianProb = probByMorphKey.get(phenotype.morphKey);
     let odds: number;
     let isMutatedDisplay = false;
     if (wasMutation && mendelianProb === undefined) {
-      odds = Number((MUTATION_CHANCE_PER_EGG / Math.max(1, enabledLoci.length)).toFixed(4));
+      odds = Number(
+        (MUTATION_CHANCE_PER_EGG / Math.max(1, enabledLoci.length + enabledModLoci.length)).toFixed(4)
+      );
       isMutatedDisplay = true;
     } else if (mendelianProb !== undefined) {
       odds = mendelianProb;
@@ -3503,6 +3770,7 @@ export function breedClutch(
       id: `snake_${now}_${i}_${Math.floor(rng() * 100000)}`,
       name,
       genotype: childGenotype,
+      ...(childModAlleles ? { modAlleles: childModAlleles } : {}),
       polygenicSeed,
       phenotype,
       currentVigor: phenotype.lineageVigor,
@@ -3726,17 +3994,30 @@ export function createStarterSnakes(): SnakeEntity[] {
 export function createTitleShowcaseSnakes(
   count = 5,
   rng: () => number = Math.random,
-  contentFlags: number = ContentFlag.RealMorphs
+  contentFlags: number = ContentFlag.RealMorphs,
+  enabledModPacks?: string[]
 ): SnakeEntity[] {
   const now = Date.now();
   const usedNames = new Set<string>();
   const showcasePool = getEnabledLoci(contentFlags).filter((loc) => loc !== 'spider');
+  const modPool = getEnabledModLoci(enabledModPacks);
   const snakes: SnakeEntity[] = [];
 
   for (let i = 0; i < count; i++) {
     const partial: Partial<Genotype> = {};
+    let modAlleles: ModAlleleMap | undefined;
     const geneCount = 1 + (rng() < 0.65 ? 1 : 0);
     for (let g = 0; g < geneCount; g++) {
+      // Mix enabled Workshop / local Gene Pack loci into title showcase only when enabled in continue slot
+      if (modPool.length > 0 && rng() < 0.35) {
+        const modLoc = modPool[Math.floor(rng() * modPool.length)];
+        const pair: AllelePair =
+          modLoc.spec.mode === 'recessive' || (modLoc.spec.mode === 'codominant' && rng() < 0.3)
+            ? [1, 1]
+            : [1, 0];
+        modAlleles = { ...(modAlleles ?? {}), [modLoc.fullId]: pair };
+        continue;
+      }
       const loc = showcasePool[Math.floor(rng() * showcasePool.length)];
       const def = LOCUS_DEFINITIONS[loc];
       if (def.mode === 'recessive') {
@@ -3749,8 +4030,9 @@ export function createTitleShowcaseSnakes(
     }
 
     const genotype = makeGenotype(partial);
+    const cleanedMod = cleanModAlleles(modAlleles);
     const seed = Number((0.1 + rng() * 0.8).toFixed(4));
-    const phenotype = evaluatePhenotype(genotype, seed);
+    const phenotype = evaluatePhenotype(genotype, seed, cleanedMod);
     const name = pickCozySnakeName(usedNames, rng);
     usedNames.add(name);
 
@@ -3758,6 +4040,7 @@ export function createTitleShowcaseSnakes(
       id: `title_${now}_${i}_${Math.floor(rng() * 10000)}`,
       name,
       genotype,
+      ...(cleanedMod ? { modAlleles: cleanedMod } : {}),
       polygenicSeed: seed,
       phenotype,
       currentVigor: phenotype.lineageVigor,
@@ -3805,6 +4088,127 @@ export function buildInitialDiscoveries(snakes: SnakeEntity[]): Record<string, M
   return map;
 }
 
+export interface SimulatorSynthesisResult {
+  genotype: Genotype;
+  modAlleles: ModAlleleMap | undefined;
+  triggered: {
+    resultName: string;
+    ingredientAName: string;
+    ingredientBName: string;
+    resultCount: 1 | 2;
+    isRecessiveHet: boolean;
+  } | null;
+}
+
+/**
+ * Interactive simulator synthesis resolver: when "Allow synthesis" is enabled in the Gene Simulator,
+ * detects any matching mod-pack or built-in elemental synthesis recipe in the current selection,
+ * consumes the required ingredient copies (turning them Off), and increments the synthesized gene On.
+ */
+export function applySimulatorSynthesis(
+  genotype: Genotype,
+  modAlleles: ModAlleleMap | undefined,
+  options: {
+    allowCoreSynthesis: boolean;
+    enabledModPacks?: string[];
+  }
+): SimulatorSynthesisResult {
+  const pairFor = (c: number): AllelePair => (c >= 2 ? [1, 1] : c === 1 ? [1, 0] : [0, 0]);
+
+  // 1. Check enabled Workshop / local Gene Pack recipes first
+  const modRecipes = getEnabledModRecipes(options.enabledModPacks);
+  for (const recipe of modRecipes) {
+    const getCount = (ing: { target: string; isCore: boolean }): number =>
+      ing.isCore
+        ? countAlleles(genotype[ing.target as LocusId])
+        : countAlleles(modAlleles?.[ing.target] ?? [0, 0]);
+
+    const cA = getCount(recipe.ingredientA);
+    const cB = getCount(recipe.ingredientB);
+    const reqA = recipe.ingredientA.minParentCopies;
+    const reqB = recipe.ingredientB.minParentCopies;
+    if (cA < reqA || cB < reqB) continue;
+
+    const nextGenotype: Genotype = { ...genotype };
+    const nextMod: ModAlleleMap = { ...(modAlleles ?? {}) };
+
+    if (recipe.ingredientA.isCore) {
+      const k = recipe.ingredientA.target as LocusId;
+      nextGenotype[k] = pairFor(Math.max(0, cA - reqA));
+    } else {
+      nextMod[recipe.ingredientA.target] = pairFor(Math.max(0, cA - reqA));
+    }
+
+    if (recipe.ingredientB.isCore) {
+      const k = recipe.ingredientB.target as LocusId;
+      nextGenotype[k] = pairFor(Math.max(0, cB - reqB));
+    } else {
+      nextMod[recipe.ingredientB.target] = pairFor(Math.max(0, cB - reqB));
+    }
+
+    const curRes = countAlleles(nextMod[recipe.resultFullId] ?? [0, 0]);
+    const nextResCount: 1 | 2 = curRes >= 1 ? 2 : 1;
+    nextMod[recipe.resultFullId] = pairFor(nextResCount);
+
+    const resDef = getModLocus(recipe.resultFullId);
+    const nameOf = (ing: { target: string; isCore: boolean }): string =>
+      ing.isCore
+        ? LOCUS_DEFINITIONS[ing.target as LocusId]?.name ?? ing.target
+        : getModLocus(ing.target)?.spec.name ?? ing.target;
+
+    return {
+      genotype: nextGenotype,
+      modAlleles: cleanModAlleles(nextMod),
+      triggered: {
+        resultName: resDef?.spec.name ?? recipe.name,
+        ingredientAName: nameOf(recipe.ingredientA),
+        ingredientBName: nameOf(recipe.ingredientB),
+        resultCount: nextResCount,
+        isRecessiveHet: resDef?.spec.mode === 'recessive' && nextResCount === 1,
+      },
+    };
+  }
+
+  // 2. Check built-in Elemental & Mineral synthesis recipes when core CustomMorphs are active
+  if (options.allowCoreSynthesis) {
+    for (const recipe of ELEMENTAL_SYNTHESIS_RECIPES) {
+      const cA = countAlleles(genotype[recipe.ingredientA]);
+      const cB = countAlleles(genotype[recipe.ingredientB]);
+      const reqA = recipe.minParentAllelesA;
+      const reqB = recipe.minParentAllelesB;
+      if (cA < reqA || cB < reqB) continue;
+
+      const curRes = countAlleles(genotype[recipe.result]);
+      const nextResCount: 1 | 2 = curRes >= 1 ? 2 : 1;
+      const nextGenotype: Genotype = {
+        ...genotype,
+        [recipe.ingredientA]: pairFor(Math.max(0, cA - reqA)),
+        [recipe.ingredientB]: pairFor(Math.max(0, cB - reqB)),
+        [recipe.result]: pairFor(nextResCount),
+      };
+
+      const resDef = LOCUS_DEFINITIONS[recipe.result];
+      return {
+        genotype: nextGenotype,
+        modAlleles: cleanModAlleles(modAlleles),
+        triggered: {
+          resultName: resDef.name,
+          ingredientAName: LOCUS_DEFINITIONS[recipe.ingredientA].name,
+          ingredientBName: LOCUS_DEFINITIONS[recipe.ingredientB].name,
+          resultCount: nextResCount,
+          isRecessiveHet: resDef.mode === 'recessive' && nextResCount === 1,
+        },
+      };
+    }
+  }
+
+  return {
+    genotype,
+    modAlleles: cleanModAlleles(modAlleles),
+    triggered: null,
+  };
+}
+
 /**
  * Spawns a full SnakeEntity from any simulated genotype + polygenic seed (used by Simulator dev debug spawn).
  */
@@ -3813,10 +4217,12 @@ export function createSimulatedSnake(
   polygenicSeed: number,
   existingNames: Set<string>,
   customName?: string,
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  modAlleles?: ModAlleleMap
 ): SnakeEntity {
   const normalized = makeGenotype(genotype);
-  const phenotype = evaluatePhenotype(normalized, polygenicSeed);
+  const cleanedMod = cleanModAlleles(modAlleles);
+  const phenotype = evaluatePhenotype(normalized, polygenicSeed, cleanedMod);
   const trimmed = customName?.trim();
   const name = trimmed && trimmed.length > 0 ? trimmed : pickCozySnakeName(existingNames, rng);
   const now = Date.now();
@@ -3824,6 +4230,7 @@ export function createSimulatedSnake(
     id: `sim_${now}_${Math.floor(rng() * 100000)}`,
     name,
     genotype: normalized,
+    ...(cleanedMod ? { modAlleles: cleanedMod } : {}),
     polygenicSeed,
     phenotype,
     currentVigor: phenotype.lineageVigor,

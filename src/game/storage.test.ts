@@ -181,11 +181,11 @@ test('Real Morphs Only disables all custom genes across loci, starters, Jean Poo
   assert.ok(starters.every((s) => !s.phenotype.isCustomMorph));
 
   const missing = getMissingLoci(starters, realOnly.contentFlags);
-  assert.ok(missing.every((loc) => !LOCUS_DEFINITIONS[loc].isCustom));
+  assert.ok(missing.every((loc) => !LOCUS_DEFINITIONS[loc as keyof typeof LOCUS_DEFINITIONS]?.isCustom));
 
   const offers = buildJeanPoolOffers(starters, { purchasesCount: 0, stockSeed: 77 }, realOnly.contentFlags);
   assert.ok(offers.length > 0);
-  assert.ok(offers.every((o) => !LOCUS_DEFINITIONS[o.locusId].isCustom && !o.snake.phenotype.isCustomMorph));
+  assert.ok(offers.every((o) => !o.isCustom && !o.snake.phenotype.isCustomMorph));
 
   // Force spontaneous mutation rolls (rng always returns 0.0001 < 0.001) and verify zero custom mutations
   let tick = 0;

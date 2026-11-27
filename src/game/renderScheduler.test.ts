@@ -13,6 +13,7 @@ import {
   scheduleCanvasPaint,
 } from './renderScheduler';
 import { globalSkinCache } from './skinCache';
+import { normalizeAngle, stepSpine } from './spine';
 import { computeSpriteSheetLayout } from './spriteSheet';
 
 test('globalSkinCache.getCached and putSynthesized round-trip externally synthesized pixels', () => {
@@ -184,6 +185,57 @@ test('createSeededWanderOrbit produces distinct, bounded wander paths for differ
     `Expected distinct seeds to diverge significantly in wander path, got maxDivergence=${maxDivergence.toFixed(1)}`
   );
   assert.notEqual(orbitA.sample(0).speed, orbitB.sample(0).speed);
+});
+
+test('Seeded spine has dense smooth trail and glides through stepSpine with zero chugging or joint snaps', () => {
+  const w = 238;
+  const h = 90;
+  for (const seed of [0.05, 0.17, 0.37, 0.52, 0.64, 0.89]) {
+    const spine = createSeededPreviewSpine(w, h, seed, false);
+    assert.ok(
+      spine.trail.length >= (spine.points.length - 2) * 5,
+      `Expected dense sub-segment trail, got ${spine.trail.length} points`
+    );
+
+    const orbit = createSeededWanderOrbit(w, h, seed, spine.heading);
+    let elapsed = 0;
+    const totalBodyLen = spine.segmentLength * (spine.points.length + 2);
+    const warmupSteps = Math.max(180, Math.min(300, Math.ceil((totalBodyLen / 28) * 60)));
+    for (let i = 0; i < warmupSteps; i++) {
+      elapsed += 1 / 60;
+      const { targetX, targetY, speed } = orbit.sample(elapsed);
+      stepSpine(spine, {
+        targetX,
+        targetY,
+        speed,
+        dt: 1 / 60,
+        bounds: { minX: 8, maxX: w - 8, minY: 8, maxY: h - 8 },
+      });
+    }
+
+    // Verify 120 live animation frames at MiniSnakeCanvas's real 50ms tick step
+    for (let frame = 0; frame < 120; frame++) {
+      const prevAngles = spine.points.map((p) => p.angle);
+      elapsed += 0.05;
+      const { targetX, targetY, speed } = orbit.sample(elapsed);
+      stepSpine(spine, {
+        targetX,
+        targetY,
+        speed,
+        dt: 0.05,
+        bounds: { minX: 8, maxX: w - 8, minY: 8, maxY: h - 8 },
+      });
+
+      // No segment should ever snap angle abruptly on a live tick
+      for (let i = 0; i < spine.points.length; i++) {
+        const dAng = Math.abs(normalizeAngle(spine.points[i].angle - prevAngles[i]));
+        assert.ok(
+          dAng < 0.28,
+          `Sudden joint snap at seg ${i}, frame ${frame}, seed ${seed}: dAng=${dAng.toFixed(3)}`
+        );
+      }
+    }
+  }
 });
 
 test('scheduleCanvasPaint executes immediately in headless Node environments', () => {

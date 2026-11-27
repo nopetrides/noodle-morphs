@@ -923,8 +923,8 @@ export const SYNTHESIS_ONLY_LOCI: ReadonlySet<LocusId> = new Set(
   ELEMENTAL_SYNTHESIS_RECIPES.map((r) => r.result)
 );
 
-export function isSynthesisOnlyLocus(locusId: LocusId): boolean {
-  return SYNTHESIS_ONLY_LOCI.has(locusId);
+export function isSynthesisOnlyLocus(locusId: LocusId | string): boolean {
+  return SYNTHESIS_ONLY_LOCI.has(locusId as LocusId);
 }
 
 export function getRecipeForResult(locusId: LocusId): ElementalSynthesisRecipe | undefined {

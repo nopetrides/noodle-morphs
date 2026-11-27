@@ -23,11 +23,13 @@ import {
   LOCI_ORDER,
   LOCUS_DEFINITIONS,
 } from './genetics';
+import { cleanModAlleles, findMissingModPacks } from './modPacks';
 import type {
   AllelePair,
   EconomyState,
   Genotype,
   LocusId,
+  ModAlleleMap,
   MorphDiscovery,
   SnakeEntity,
   TerrariumSettings,
@@ -63,6 +65,7 @@ export interface CompactSnakeLeaf {
   c?: number; // petCount (omitted when 0)
   v?: number; // modified max lineageVigor override (only when differing from default phenotype)
   cv?: number; // current breeding vigour (only when < max vigor)
+  ma?: Record<string, 1 | 2>; // sparse namespaced Workshop / local Gene Pack alleles
 }
 
 export interface MorphTrieNode {
@@ -72,6 +75,7 @@ export interface MorphTrieNode {
 
 export interface CompactDiscoveryEntry {
   g: string;
+  ma?: Record<string, 1 | 2>;
   p: number;
   t: number;
   n: number;
@@ -109,6 +113,8 @@ export interface LoadedGameState {
   settings: TerrariumSettings;
   economy: EconomyState;
   gameConfig: GameConfig;
+  /** Pack IDs referenced by this save's config or snakes that are not currently installed */
+  missingModPacks?: string[];
   savedAt: number;
 }
 
@@ -196,6 +202,30 @@ function encodeGenotypeCode(genotype: Genotype): string {
   return genotypeToTrieTokens(genotype).join(',');
 }
 
+function encodeCompactModAlleles(alleles?: ModAlleleMap): Record<string, 1 | 2> | undefined {
+  if (!alleles) return undefined;
+  const out: Record<string, 1 | 2> = {};
+  let hasAny = false;
+  for (const [fullId, pair] of Object.entries(alleles)) {
+    const c = countAlleles(pair);
+    if (c > 0) {
+      out[fullId] = c === 2 ? 2 : 1;
+      hasAny = true;
+    }
+  }
+  return hasAny ? out : undefined;
+}
+
+function decodeCompactModAlleles(raw?: Record<string, 1 | 2>): ModAlleleMap | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const out: ModAlleleMap = {};
+  for (const [fullId, count] of Object.entries(raw)) {
+    if (typeof count !== 'number' || count <= 0) continue;
+    out[fullId] = count >= 2 ? [1, 1] : [1, 0];
+  }
+  return cleanModAlleles(out);
+}
+
 export function encodeSaveStateV2(
   state: Omit<LoadedGameState, 'savedAt' | 'displayedIds' | 'economy' | 'clutchReady' | 'gameConfig'> & {
     displayedIds?: string[];
@@ -209,8 +239,9 @@ export function encodeSaveStateV2(
   const tree: MorphTrieNode = {};
 
   for (const snake of state.snakes) {
-    const defaultPheno = evaluatePhenotype(snake.genotype, snake.polygenicSeed);
+    const defaultPheno = evaluatePhenotype(snake.genotype, snake.polygenicSeed, snake.modAlleles);
     const maxVigor = getMaxVigor(snake);
+    const compactMa = encodeCompactModAlleles(snake.modAlleles);
     const leaf: CompactSnakeLeaf = {
       i: snake.id,
       n: snake.name,
@@ -241,6 +272,9 @@ export function encodeSaveStateV2(
     if (snake.currentVigor < maxVigor - 0.05) {
       leaf.cv = Math.round(Math.max(0, snake.currentVigor) * 10) / 10;
     }
+    if (compactMa) {
+      leaf.ma = compactMa;
+    }
 
     insertIntoMorphTree(tree, snake.genotype, leaf);
   }
@@ -256,12 +290,14 @@ export function encodeSaveStateV2(
     const genotypeCode = sampleSnake
       ? encodeGenotypeCode(sampleSnake.genotype)
       : inferGenotypeCodeFromMorphKey(morphKey);
+    const sampleMa = sampleSnake ? encodeCompactModAlleles(sampleSnake.modAlleles) : undefined;
     const sampleSeed = sampleSnake
       ? Math.round(sampleSnake.polygenicSeed * 10000) / 10000
       : Math.round((entry.samplePatternRule.variationSeed ?? 0.5) * 10000) / 10000;
 
     disc[morphKey] = {
       g: genotypeCode,
+      ...(sampleMa ? { ma: sampleMa } : {}),
       p: sampleSeed,
       t: entry.firstDiscoveredAt,
       n: entry.countHatched,
@@ -485,7 +521,8 @@ export function decodeSaveStateV2(
   if (rawEntries.length < 2) return null;
 
   let snakes: SnakeEntity[] = rawEntries.map(({ leaf, genotype }) => {
-    const basePhenotype = evaluatePhenotype(genotype, leaf.p);
+    const modAlleles = decodeCompactModAlleles(leaf.ma);
+    const basePhenotype = evaluatePhenotype(genotype, leaf.p, modAlleles);
     const phenotype =
       typeof leaf.v === 'number'
         ? { ...basePhenotype, lineageVigor: Math.max(20, leaf.v) }
@@ -507,6 +544,7 @@ export function decodeSaveStateV2(
       id: leaf.i,
       name: leaf.n,
       genotype,
+      ...(modAlleles ? { modAlleles } : {}),
       polygenicSeed: leaf.p,
       phenotype,
       currentVigor,
@@ -560,7 +598,8 @@ export function decodeSaveStateV2(
       ? sampleSnake.phenotype
       : evaluatePhenotype(
           tokensToGenotype(entry.g ? entry.g.split(',') : []),
-          entry.p ?? 0.5
+          entry.p ?? 0.5,
+          decodeCompactModAlleles(entry.ma)
         );
 
     discoveries[morphKey] = {
@@ -611,6 +650,11 @@ export function decodeSaveStateV2(
     snakes = snakes.map((s) => ({ ...s, onDisplay: allowed.has(s.id) }));
   }
 
+  const missingModPacks = findMissingModPacks(
+    gameConfig.enabledModPacks,
+    snakes.map((s) => s.modAlleles)
+  );
+
   return {
     snakes,
     displayedIds: validDisplayedIds,
@@ -627,6 +671,7 @@ export function decodeSaveStateV2(
     },
     economy,
     gameConfig,
+    ...(missingModPacks.length > 0 ? { missingModPacks } : {}),
     savedAt: typeof payload.at === 'number' ? payload.at : now,
   };
 }

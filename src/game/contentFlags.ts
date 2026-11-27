@@ -28,6 +28,8 @@ export interface GameConfig {
   mode: GameModeId;
   /** Bitmask of ContentFlag values */
   contentFlags: number;
+  /** Optional list of enabled Steam Workshop / local Gene Pack IDs for this save */
+  enabledModPacks?: string[];
 }
 
 export const DEFAULT_CONTENT_FLAGS: number =
@@ -54,6 +56,7 @@ export function createGameConfigForMode(
   options?: {
     jeanPool?: boolean;
     hissDepot?: boolean;
+    enabledModPacks?: string[];
   }
 ): GameConfig {
   let flags = ContentFlag.RealMorphs;
@@ -66,7 +69,25 @@ export function createGameConfigForMode(
   if (options?.hissDepot ?? true) {
     flags = setContentFlag(flags, ContentFlag.HissDepot, true);
   }
-  return { mode, contentFlags: flags };
+  const packs = normalizePackIdList(options?.enabledModPacks);
+  return packs.length > 0 ? { mode, contentFlags: flags, enabledModPacks: packs } : { mode, contentFlags: flags };
+}
+
+function normalizePackIdList(raw?: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item === 'string') {
+      const trimmed = item.trim();
+      if (trimmed.length > 0 && !seen.has(trimmed)) {
+        seen.add(trimmed);
+        out.push(trimmed);
+      }
+    }
+  }
+  out.sort();
+  return out;
 }
 
 export function normalizeGameConfig(raw?: Partial<GameConfig> | null): GameConfig {
@@ -84,7 +105,10 @@ export function normalizeGameConfig(raw?: Partial<GameConfig> | null): GameConfi
   if (mode === 'real_only') {
     flags = setContentFlag(flags, ContentFlag.CustomMorphs, false);
   }
-  return { mode, contentFlags: flags };
+  const enabledModPacks = normalizePackIdList(raw.enabledModPacks);
+  return enabledModPacks.length > 0
+    ? { mode, contentFlags: flags, enabledModPacks }
+    : { mode, contentFlags: flags };
 }
 
 export function getGameModeLabel(mode: GameModeId): string {

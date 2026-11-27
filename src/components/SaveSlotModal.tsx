@@ -5,6 +5,7 @@ import {
   ChevronUp,
   FolderOpen,
   Hammer,
+  Package,
   PlusCircle,
   Save,
   SlidersHorizontal,
@@ -23,6 +24,7 @@ import {
   type SaveSlotId,
 } from '../game/contentFlags';
 import { formatCurrency } from '../game/economy';
+import { getInstalledModPacks } from '../game/modPacks';
 import type { SaveSlotSummary } from '../game/storage';
 import { MiniSnakeCanvas } from './MiniSnakeCanvas';
 
@@ -68,6 +70,10 @@ export function SaveSlotModal({
     mode === 'new' ? firstEmpty : (activeSlotId ?? slots.find((s) => !s.isEmpty)?.slotId ?? 1)
   );
   const [gameMode, setGameMode] = useState<GameModeId>('real_plus_fun');
+  const installedModPacks = getInstalledModPacks();
+  const [selectedModPacks, setSelectedModPacks] = useState<string[]>(() =>
+    installedModPacks.map((p) => p.packId)
+  );
   const [customSystemsOpen, setCustomSystemsOpen] = useState<boolean>(false);
   const [jeanPoolEnabled, setJeanPoolEnabled] = useState<boolean>(true);
   const [hissDepotEnabled, setHissDepotEnabled] = useState<boolean>(true);
@@ -77,10 +83,17 @@ export function SaveSlotModal({
 
   const selectedSlot = slots.find((s) => s.slotId === selectedSlotId) ?? slots[0];
 
+  const toggleModPack = (packId: string) => {
+    setSelectedModPacks((prev) =>
+      prev.includes(packId) ? prev.filter((id) => id !== packId) : [...prev, packId]
+    );
+  };
+
   const handleNewConfirm = () => {
     const config = createGameConfigForMode(gameMode, {
       jeanPool: jeanPoolEnabled,
       hissDepot: hissDepotEnabled,
+      enabledModPacks: selectedModPacks,
     });
     if (!selectedSlot.isEmpty && confirmOverwriteSlot !== selectedSlotId) {
       setConfirmOverwriteSlot(selectedSlotId);
@@ -230,6 +243,12 @@ export function SaveSlotModal({
                               >
                                 {getGameModeLabel(slot.gameConfig.mode)}
                               </span>
+                              {slot.gameConfig.enabledModPacks && slot.gameConfig.enabledModPacks.length > 0 && (
+                                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#1E363A] text-[#9EE8DE] border border-[#56B8B0]/40">
+                                  +{slot.gameConfig.enabledModPacks.length}{' '}
+                                  {slot.gameConfig.enabledModPacks.length === 1 ? 'pack' : 'packs'}
+                                </span>
+                              )}
                               {!hasJP && (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#2A221B] text-[#A89884]">
                                   No Jean Pool
@@ -384,6 +403,50 @@ export function SaveSlotModal({
                   </button>
                 </div>
               </div>
+
+              {/* Per-Save Workshop / Local Gene Packs Selection */}
+              {installedModPacks.length > 0 && (
+                <div className="space-y-2 pt-2 border-t border-[#D8BC87]/15">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-[#9EE8DE] flex items-center gap-1.5">
+                    <Package className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Gene Packs (Per-Save)</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {installedModPacks.map((pack) => {
+                      const checked = selectedModPacks.includes(pack.packId);
+                      return (
+                        <label
+                          key={pack.packId}
+                          data-testid={`new-game-pack-${pack.packId}`}
+                          className={`flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer select-none transition-colors ${
+                            checked
+                              ? 'bg-[#1A292B] border-[#56B8B0]/55'
+                              : 'bg-[#231D17] border-[#D8BC87]/18'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleModPack(pack.packId)}
+                            className="mt-0.5 w-4 h-4 accent-[#56B8B0] rounded cursor-pointer"
+                          />
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold text-[#F7F1E5] truncate">
+                              {pack.name}
+                            </div>
+                            <div className="text-[11px] text-[#A8BDBC]">
+                              {pack.loci.length} {pack.loci.length === 1 ? 'gene' : 'genes'}
+                              {pack.synthesisRecipes?.length
+                                ? ` · ${pack.synthesisRecipes.length} synthesis`
+                                : ''}
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <div className="pt-2 border-t border-[#D8BC87]/15">
                 <button

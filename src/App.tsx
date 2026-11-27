@@ -3,6 +3,7 @@ import { GalleryDrawer } from './components/GalleryDrawer';
 import { HatchRevealModal } from './components/HatchRevealModal';
 import { HissDepotIntroModal } from './components/HissDepotIntroModal';
 import { JeanPoolIntroModal } from './components/JeanPoolIntroModal';
+import { ModPacksModal } from './components/ModPacksModal';
 import { PauseModal } from './components/PauseModal';
 import { SaveSlotModal, type SaveSlotModalMode } from './components/SaveSlotModal';
 import { SellConfirmModal } from './components/SellConfirmModal';
@@ -55,9 +56,16 @@ import {
   buildInitialDiscoveries,
   createRandomStarterPair,
   createTitleShowcaseSnakes,
+  evaluatePhenotype,
   isLethalSpiderPairing,
   pickSafeMateFor,
 } from './game/genetics';
+import {
+  findMissingModPacks,
+  getInstalledModPacks,
+  hydrateModPacksFromStorage,
+  onModPacksChanged,
+} from './game/modPacks';
 import {
   deleteSaveSlot,
   getLastActiveSlotId,
@@ -129,7 +137,16 @@ function getTitleShowcaseContentFlags(continueSlot: SaveSlotSummary | null): num
     : ContentFlag.RealMorphs;
 }
 
+function getTitleShowcaseModPacks(continueSlot: SaveSlotSummary | null): string[] | undefined {
+  return continueSlot && !continueSlot.isEmpty
+    ? continueSlot.gameConfig.enabledModPacks
+    : undefined;
+}
+
 export default function App() {
+  // Hydrate installed local / Workshop Gene Packs before decoding saves or title showcase snakes
+  hydrateModPacksFromStorage();
+
   const autostart = useMemo(() => getInitialAutostart(), []);
 
   // Optional autostart boot (for dev preview URLs); normal players begin cleanly on Title Screen
@@ -145,13 +162,22 @@ export default function App() {
 
   const [phase, setPhase] = useState<GamePhase>(() => (autostartBoot ? 'playing' : 'title'));
   const [saveSlots, setSaveSlots] = useState<SaveSlotSummary[]>(() => listSaveSlots());
+  const [installedPackCount, setInstalledPackCount] = useState<number>(
+    () => getInstalledModPacks().length
+  );
+  const [modPacksModalOpen, setModPacksModalOpen] = useState<boolean>(false);
+  const [missingModPacks, setMissingModPacks] = useState<string[]>(() => {
+    const candidate = autostartBoot?.state as { missingModPacks?: string[] } | undefined;
+    return candidate?.missingModPacks ?? [];
+  });
   const [titleSnakes, setTitleSnakes] = useState<SnakeEntity[]>(() => {
     if (autostartBoot) return [];
     const initialContinue = resolveContinueSlotSummary(listSaveSlots());
     return createTitleShowcaseSnakes(
       5,
       Math.random,
-      getTitleShowcaseContentFlags(initialContinue)
+      getTitleShowcaseContentFlags(initialContinue),
+      getTitleShowcaseModPacks(initialContinue)
     );
   });
   const [activeSlotId, setActiveSlotId] = useState<SaveSlotId | null>(() =>
@@ -215,20 +241,50 @@ export default function App() {
     () => getTitleShowcaseContentFlags(continueSlot),
     [continueSlot]
   );
-  const lastTitleShowcaseFlagsRef = useRef<number>(titleShowcaseFlags);
+  const titleShowcaseModPacks = useMemo(
+    () => getTitleShowcaseModPacks(continueSlot),
+    [continueSlot]
+  );
+  const titleShowcaseSig = `${titleShowcaseFlags}|${(titleShowcaseModPacks ?? []).join(',')}|${installedPackCount}`;
+  const lastTitleShowcaseSigRef = useRef<string>(titleShowcaseSig);
 
-  // If the continue slot's enabled categories change while on the title screen (e.g. deleting a slot),
+  // If the continue slot's enabled categories or installed packs change while on the title screen,
   // refresh the background showcase snakes to match.
   useEffect(() => {
     if (phase !== 'title') {
-      lastTitleShowcaseFlagsRef.current = titleShowcaseFlags;
+      lastTitleShowcaseSigRef.current = titleShowcaseSig;
       return;
     }
-    if (lastTitleShowcaseFlagsRef.current !== titleShowcaseFlags) {
-      lastTitleShowcaseFlagsRef.current = titleShowcaseFlags;
-      setTitleSnakes(createTitleShowcaseSnakes(5, Math.random, titleShowcaseFlags));
+    if (lastTitleShowcaseSigRef.current !== titleShowcaseSig) {
+      lastTitleShowcaseSigRef.current = titleShowcaseSig;
+      setTitleSnakes(
+        createTitleShowcaseSnakes(5, Math.random, titleShowcaseFlags, titleShowcaseModPacks)
+      );
     }
-  }, [phase, titleShowcaseFlags]);
+  }, [phase, titleShowcaseSig, titleShowcaseFlags, titleShowcaseModPacks]);
+
+  // Keep installed pack count and active snake phenotypes in sync when packs are installed/removed
+  useEffect(() => {
+    return onModPacksChanged(() => {
+      setInstalledPackCount(getInstalledModPacks().length);
+      refreshSaveSlots();
+      setSnakes((prev) => {
+        if (prev.length === 0) return prev;
+        const updated = prev.map((s) =>
+          s.modAlleles
+            ? { ...s, phenotype: evaluatePhenotype(s.genotype, s.polygenicSeed, s.modAlleles) }
+            : s
+        );
+        setMissingModPacks(
+          findMissingModPacks(
+            gameConfig.enabledModPacks,
+            updated.map((s) => s.modAlleles)
+          )
+        );
+        return updated;
+      });
+    });
+  }, [gameConfig.enabledModPacks, refreshSaveSlots]);
 
   const jeanPoolEnabled = hasContentFlag(gameConfig.contentFlags, ContentFlag.JeanPool);
   const hissDepotEnabled = hasContentFlag(gameConfig.contentFlags, ContentFlag.HissDepot);
@@ -419,6 +475,7 @@ export default function App() {
       setActiveSlotId(slotId);
       setLastActiveSlotId(slotId);
       setGameConfig(nextConfig);
+      setMissingModPacks(loaded.missingModPacks ?? []);
       setSnakes(loaded.snakes);
       setDiscoveries(loaded.discoveries);
       setSireId(loadedSire.id);
@@ -463,6 +520,7 @@ export default function App() {
       setActiveSlotId(slotId);
       setLastActiveSlotId(slotId);
       setGameConfig(fresh.gameConfig);
+      setMissingModPacks([]);
       setSnakes(fresh.snakes);
       setDiscoveries(fresh.discoveries);
       setSireId(fresh.sireId);
@@ -573,9 +631,12 @@ export default function App() {
     setDockHighlightTab(null);
     const updatedSlots = listSaveSlots();
     setSaveSlots(updatedSlots);
-    const nextTitleFlags = getTitleShowcaseContentFlags(resolveContinueSlotSummary(updatedSlots));
-    lastTitleShowcaseFlagsRef.current = nextTitleFlags;
-    setTitleSnakes(createTitleShowcaseSnakes(5, Math.random, nextTitleFlags));
+    const nextContinue = resolveContinueSlotSummary(updatedSlots);
+    const nextTitleFlags = getTitleShowcaseContentFlags(nextContinue);
+    const nextTitlePacks = getTitleShowcaseModPacks(nextContinue);
+    lastTitleShowcaseSigRef.current = `${nextTitleFlags}|${(nextTitlePacks ?? []).join(',')}|${getInstalledModPacks().length}`;
+    setMissingModPacks([]);
+    setTitleSnakes(createTitleShowcaseSnakes(5, Math.random, nextTitleFlags, nextTitlePacks));
     setPhase('title');
   }, [
     activeSlotId,
@@ -844,7 +905,8 @@ export default function App() {
       activeClutchConfig.clutchSize,
       Math.random,
       hissDepotEnabled ? effectiveHissDepot.biasWeights : undefined,
-      gameConfig.contentFlags
+      gameConfig.contentFlags,
+      gameConfig.enabledModPacks
     );
     setActiveDrawer(null);
     setSelectedSnakeId(null);
@@ -858,6 +920,7 @@ export default function App() {
     hissDepotEnabled,
     effectiveHissDepot.biasWeights,
     gameConfig.contentFlags,
+    gameConfig.enabledModPacks,
   ]);
 
   const handleRevealEgg = useCallback((eggId: string) => {
@@ -1304,7 +1367,7 @@ export default function App() {
     if (phase !== 'playing' || needsStarterConfirm || !jeanPoolEnabled) return;
     if (!jeanPoolUnlocked || economy.jeanPoolIntroSeen) return;
 
-    const missing = getMissingLoci(snakes, gameConfig.contentFlags);
+    const missing = getMissingLoci(snakes, gameConfig.contentFlags, gameConfig.enabledModPacks);
     if (missing.length === 0) {
       // Player somehow already owns every possible gene before first sale — skip empty Jean Pool flow
       setEconomy((prev) => (prev.jeanPoolIntroSeen ? prev : { ...prev, jeanPoolIntroSeen: true }));
@@ -1410,7 +1473,12 @@ export default function App() {
         phase={phase}
         heatLampOn={phase === 'title' ? true : settings.heatLampOn}
         isOccluded={Boolean(
-          activeClutch || activeDrawer || needsStarterConfirm || pendingSale || slotModalMode
+          activeClutch ||
+            activeDrawer ||
+            needsStarterConfirm ||
+            pendingSale ||
+            slotModalMode ||
+            modPacksModalOpen
         )}
         mistTriggerCount={mistTriggerCount}
         onSelectSnake={handleSelectSnake}
@@ -1422,6 +1490,7 @@ export default function App() {
         <TitleOverlay
           hasSaves={hasSaves}
           continueSlot={continueSlot}
+          installedPackCount={installedPackCount}
           onContinue={handleContinueFromTitle}
           onNewGame={() => {
             audioEngine.playSoftClick();
@@ -1433,7 +1502,42 @@ export default function App() {
             refreshSaveSlots();
             setSlotModalMode('load');
           }}
+          onOpenModPacks={() => {
+            audioEngine.playSoftClick();
+            setModPacksModalOpen(true);
+          }}
         />
+      )}
+
+      {/* Missing Workshop / Gene Pack Non-Destructive Warning Banner */}
+      {phase === 'playing' && missingModPacks.length > 0 && (
+        <div
+          role="status"
+          data-testid="missing-mod-packs-banner"
+          className="fixed top-20 left-1/2 -translate-x-1/2 z-40 max-w-xl w-[calc(100%-2rem)] rounded-xl bg-[#2B2016]/95 border border-[#D9A754]/55 shadow-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-[#F5E6C8]"
+        >
+          <span className="min-w-0">
+            <strong className="text-[#F1CD82]">Missing Gene Pack(s):</strong>{' '}
+            {missingModPacks.join(', ')}. Affected snakes render as wild-type until reinstalled; raw
+            genetics are safely preserved.
+          </span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setModPacksModalOpen(true)}
+              className="px-2.5 py-1 rounded-md bg-[#56B8B0] hover:bg-[#6CCAC2] text-[#102022] font-semibold cursor-pointer"
+            >
+              Gene Packs
+            </button>
+            <button
+              type="button"
+              onClick={() => setMissingModPacks([])}
+              className="px-2 py-1 rounded-md bg-[#3A2E22] hover:bg-[#493A2B] text-[#E6DAC8] cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
       )}
 
       {/* First-Time 2-Starter Random Pair Onboarding Modal */}
@@ -1519,6 +1623,7 @@ export default function App() {
           clutchesHatched={clutchesHatched}
           economy={economy}
           contentFlags={gameConfig.contentFlags}
+          enabledModPacks={gameConfig.enabledModPacks}
           onChangeTab={(tab) => {
             audioEngine.playSoftClick();
             setActiveDrawer(tab);
@@ -1536,6 +1641,7 @@ export default function App() {
           onAdjustBiasWeight={handleAdjustBiasWeight}
           onResetBiasWeights={handleResetBiasWeights}
           onDebugAddSnake={handleDebugAddSnake}
+          onOpenModPacks={() => setModPacksModalOpen(true)}
         />
       )}
 
@@ -1637,6 +1743,17 @@ export default function App() {
           onLoadSlot={handleLoadSlot}
           onSaveToSlot={handleSaveToSlot}
           onDeleteSlot={handleDeleteSlot}
+        />
+      )}
+
+      {/* Workshop / Local Gene Packs Manager & Studio Modal */}
+      {modPacksModalOpen && (
+        <ModPacksModal
+          onClose={() => setModPacksModalOpen(false)}
+          onPacksChanged={() => {
+            setInstalledPackCount(getInstalledModPacks().length);
+            refreshSaveSlots();
+          }}
         />
       )}
     </main>

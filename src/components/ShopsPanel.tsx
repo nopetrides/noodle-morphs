@@ -16,7 +16,9 @@ import {
   MAX_DISPLAY_UPGRADES,
   MAX_INCUBATOR_UPGRADES,
 } from '../game/economy';
-import { getEnabledLoci, LOCUS_DEFINITIONS } from '../game/genetics';
+import { isSynthesisOnlyLocus } from '../game/elementalSynthesis';
+import { getEnabledLoci } from '../game/genetics';
+import { getEnabledModLoci, isModSynthesisOnlyLocus } from '../game/modPacks';
 import type { EconomyState, InheritanceMode, SnakeEntity } from '../game/types';
 import { MiniSnakeCanvas } from './MiniSnakeCanvas';
 
@@ -34,21 +36,34 @@ interface JeanPoolPanelProps {
   snakes: SnakeEntity[];
   economy: EconomyState;
   contentFlags: number;
+  enabledModPacks?: string[];
   onBuyOffer: (offer: JeanPoolOffer) => void;
 }
 
-export function JeanPoolPanel({ snakes, economy, contentFlags, onBuyOffer }: JeanPoolPanelProps) {
-  const enabledLoci = useMemo(() => getEnabledLoci(contentFlags), [contentFlags]);
+export function JeanPoolPanel({
+  snakes,
+  economy,
+  contentFlags,
+  enabledModPacks,
+  onBuyOffer,
+}: JeanPoolPanelProps) {
+  const totalAcquirableCount = useMemo(() => {
+    const coreCount = getEnabledLoci(contentFlags).filter((loc) => !isSynthesisOnlyLocus(loc)).length;
+    const modCount = getEnabledModLoci(enabledModPacks).filter(
+      (m) => !isModSynthesisOnlyLocus(m.fullId)
+    ).length;
+    return coreCount + modCount;
+  }, [contentFlags, enabledModPacks]);
   const missingLoci = useMemo(
-    () => getMissingLoci(snakes, contentFlags),
-    [snakes, contentFlags]
+    () => getMissingLoci(snakes, contentFlags, enabledModPacks),
+    [snakes, contentFlags, enabledModPacks]
   );
   const offers = useMemo(
-    () => buildJeanPoolOffers(snakes, economy.jeanPool, contentFlags),
-    [snakes, economy.jeanPool, contentFlags]
+    () => buildJeanPoolOffers(snakes, economy.jeanPool, contentFlags, enabledModPacks),
+    [snakes, economy.jeanPool, contentFlags, enabledModPacks]
   );
   const onCooldown = economy.jeanPool.cooldownRemainingSec > 0;
-  const ownedGeneCount = enabledLoci.length - missingLoci.length;
+  const ownedGeneCount = Math.max(0, totalAcquirableCount - missingLoci.length);
 
   return (
     <div data-testid="jean-pool-panel" className="space-y-5">
@@ -67,7 +82,7 @@ export function JeanPoolPanel({ snakes, economy, contentFlags, onBuyOffer }: Jea
               The Jean Pool
             </h3>
             <span className="font-mono-code text-xs text-[#A9C4E4] tabular-nums">
-              {ownedGeneCount}/{enabledLoci.length} genes in collection
+              {ownedGeneCount}/{totalAcquirableCount} genes in collection
             </span>
           </div>
           <p className="text-xs sm:text-sm text-[#B8C7D9]">
@@ -109,7 +124,6 @@ export function JeanPoolPanel({ snakes, economy, contentFlags, onBuyOffer }: Jea
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {offers.map((offer) => {
-            const def = LOCUS_DEFINITIONS[offer.locusId];
             const affordable = canAfford(economy.money, offer.price);
 
             return (
@@ -127,14 +141,18 @@ export function JeanPoolPanel({ snakes, economy, contentFlags, onBuyOffer }: Jea
                         {offer.snake.phenotype.morphName}
                       </p>
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      {def.isCustom && (
+                    <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
+                      {offer.packName ? (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#1E363A] text-[#9EE8DE] border border-[#56B8B0]/45">
+                          Pack · {offer.packName}
+                        </span>
+                      ) : offer.isCustom ? (
                         <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#3B2B4B] text-[#DEC2FF] border border-[#9B6EDB]/40">
                           Custom
                         </span>
-                      )}
+                      ) : null}
                       <span className="font-mono-code text-xs px-2 py-0.5 rounded bg-[#1A2029] text-[#B7D2F0] capitalize">
-                        {def.mode}
+                        {offer.locusMode}
                       </span>
                     </div>
                   </div>
@@ -148,9 +166,9 @@ export function JeanPoolPanel({ snakes, economy, contentFlags, onBuyOffer }: Jea
                     />
                   </div>
 
-                  <p className="text-xs text-[#C2B4A1] leading-relaxed">{def.description}</p>
+                  <p className="text-xs text-[#C2B4A1] leading-relaxed">{offer.locusDescription}</p>
                   <div className="text-[11px] text-[#9E8F7B]">
-                    New gene: <span className="text-[#E9C16E] font-medium">{def.name}</span> · Max Vigour{' '}
+                    New gene: <span className="text-[#E9C16E] font-medium">{offer.locusName}</span> · Max Vigour{' '}
                     {offer.snake.phenotype.lineageVigor}
                   </div>
                 </div>

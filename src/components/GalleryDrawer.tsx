@@ -60,6 +60,7 @@ interface GalleryDrawerProps {
   clutchesHatched: number;
   economy: EconomyState;
   contentFlags: number;
+  enabledModPacks?: string[];
   onChangeTab: (tab: ActiveDrawerTab) => void;
   onClose: () => void;
   onToggleDisplay: (snakeId: string) => void;
@@ -74,6 +75,7 @@ interface GalleryDrawerProps {
   onAdjustBiasWeight: (mode: InheritanceMode, value: number) => void;
   onResetBiasWeights: () => void;
   onDebugAddSnake: (snake: SnakeEntity) => void;
+  onOpenModPacks?: () => void;
 }
 
 const MORPH_TAGS: MorphTag[] = [
@@ -97,6 +99,7 @@ export function GalleryDrawer({
   clutchesHatched,
   economy,
   contentFlags,
+  enabledModPacks,
   onChangeTab,
   onClose,
   onToggleDisplay,
@@ -111,6 +114,7 @@ export function GalleryDrawer({
   onAdjustBiasWeight,
   onResetBiasWeights,
   onDebugAddSnake,
+  onOpenModPacks,
 }: GalleryDrawerProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
@@ -183,12 +187,12 @@ export function GalleryDrawer({
     [snakes, parentSort, sire, discoveredKeys]
   );
   const sireUndiscoveredMap = useMemo(
-    () => buildUndiscoveredChildrenMap(snakes, dam, discoveredKeys, contentFlags),
-    [snakes, dam, discoveredKeys, contentFlags]
+    () => buildUndiscoveredChildrenMap(snakes, dam, discoveredKeys, contentFlags, enabledModPacks),
+    [snakes, dam, discoveredKeys, contentFlags, enabledModPacks]
   );
   const damUndiscoveredMap = useMemo(
-    () => buildUndiscoveredChildrenMap(snakes, sire, discoveredKeys, contentFlags),
-    [snakes, sire, discoveredKeys, contentFlags]
+    () => buildUndiscoveredChildrenMap(snakes, sire, discoveredKeys, contentFlags, enabledModPacks),
+    [snakes, sire, discoveredKeys, contentFlags, enabledModPacks]
   );
 
   const breedingPreview = useMemo(
@@ -198,9 +202,18 @@ export function GalleryDrawer({
         dam,
         discoveredKeys,
         hissDepotEnabled ? effectiveHissDepot.biasWeights : undefined,
-        contentFlags
+        contentFlags,
+        enabledModPacks
       ),
-    [sire, dam, discoveredKeys, hissDepotEnabled, effectiveHissDepot.biasWeights, contentFlags]
+    [
+      sire,
+      dam,
+      discoveredKeys,
+      hissDepotEnabled,
+      effectiveHissDepot.biasWeights,
+      contentFlags,
+      enabledModPacks,
+    ]
   );
 
   const customMorphsEnabled = hasContentFlag(contentFlags, ContentFlag.CustomMorphs);
@@ -1093,7 +1106,9 @@ export function GalleryDrawer({
               discoveries={discoveries}
               soldMorphKeys={soldMorphKeys}
               contentFlags={contentFlags}
+              enabledModPacks={enabledModPacks}
               onDebugAddSnake={onDebugAddSnake}
+              onOpenModPacks={onOpenModPacks}
             />
           )}
 
@@ -1102,6 +1117,7 @@ export function GalleryDrawer({
               snakes={snakes}
               economy={economy}
               contentFlags={contentFlags}
+              enabledModPacks={enabledModPacks}
               onBuyOffer={onBuyJeanPoolOffer}
             />
           )}

@@ -8,6 +8,7 @@ import {
   FlaskConical,
   Grid2x2,
   Layers,
+  Package,
   Plus,
   RotateCcw,
   Search,
@@ -17,10 +18,11 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import { ContentFlag, hasContentFlag } from '../game/contentFlags';
+import { ContentFlag, DEFAULT_CONTENT_FLAGS, hasContentFlag } from '../game/contentFlags';
 import { DEV_TOOLS_ENABLED } from '../game/env';
 import { evaluateSnakeSaleValue, formatCurrency, getMaxVigor } from '../game/economy';
 import {
+  applySimulatorSynthesis,
   countAlleles,
   createSimulatedSnake,
   createWildTypeGenotype,
@@ -30,6 +32,12 @@ import {
   LOCUS_DEFINITIONS,
   resolveSkinSpecForPhenotype,
 } from '../game/genetics';
+import {
+  cleanModAlleles,
+  getEnabledModLoci,
+  getEnabledModRecipes,
+  getInstalledModPacks,
+} from '../game/modPacks';
 import { globalSkinCache } from '../game/skinCache';
 import { renderMorphSpriteSheetProgressive } from '../game/spriteSheet';
 import type {
@@ -38,6 +46,7 @@ import type {
   Genotype,
   InheritanceMode,
   LocusId,
+  ModAlleleMap,
   MorphDiscovery,
   SkinDebugStage,
   SkinFieldParams,
@@ -47,15 +56,28 @@ import type {
 } from '../game/types';
 import { MiniSnakeCanvas } from './MiniSnakeCanvas';
 
+const EMPTY_SNAKES: SnakeEntity[] = [];
+const EMPTY_DISCOVERIES: Record<string, MorphDiscovery> = {};
+const EMPTY_SOLD_KEYS = new Set<string>();
+
 interface MorphSimulatorPanelProps {
-  snakes: SnakeEntity[];
-  discoveries: Record<string, MorphDiscovery>;
-  soldMorphKeys: Set<string>;
-  contentFlags: number;
-  onDebugAddSnake: (snake: SnakeEntity) => void;
+  snakes?: SnakeEntity[];
+  discoveries?: Record<string, MorphDiscovery>;
+  soldMorphKeys?: Set<string>;
+  contentFlags?: number;
+  enabledModPacks?: string[];
+  /**
+   * Optional pack-focused sandbox mode (used from Gene Packs / Studio):
+   * - Shows ONLY the genes from `focusPackId` by default
+   * - Replaces "Include unowned genes" with "Include all installed genes" (no spoiler prompt)
+   * - Hides save-specific discovery/spawner chrome
+   */
+  focusPackId?: string;
+  onDebugAddSnake?: (snake: SnakeEntity) => void;
+  onOpenModPacks?: () => void;
 }
 
-type SimulatorFilter = 'all' | 'real' | 'custom' | InheritanceMode;
+type SimulatorFilter = 'all' | 'real' | 'custom' | 'packs' | InheritanceMode;
 
 const DEBUG_STAGES: { id: SkinDebugStage; label: string }[] = [
   { id: 'final', label: 'Final' },
@@ -164,15 +186,20 @@ function formatActiveChipBadge(mode: InheritanceMode, count: number): string {
 }
 
 export function MorphSimulatorPanel({
-  snakes,
-  discoveries,
-  soldMorphKeys,
-  contentFlags,
+  snakes = EMPTY_SNAKES,
+  discoveries = EMPTY_DISCOVERIES,
+  soldMorphKeys = EMPTY_SOLD_KEYS,
+  contentFlags = DEFAULT_CONTENT_FLAGS,
+  enabledModPacks,
+  focusPackId,
   onDebugAddSnake,
+  onOpenModPacks,
 }: MorphSimulatorPanelProps) {
+  const isPackSandbox = Boolean(focusPackId);
   const customEnabled = hasContentFlag(contentFlags, ContentFlag.CustomMorphs);
   const enabledLoci = useMemo(() => getEnabledLoci(contentFlags), [contentFlags]);
   const [genotype, setGenotype] = useState<Genotype>(() => createWildTypeGenotype());
+  const [modAlleles, setModAlleles] = useState<ModAlleleMap>({});
   const [polygenicSeed, setPolygenicSeed] = useState<number>(0.42);
   const [includeUnowned, setIncludeUnowned] = useState<boolean>(false);
   const [confirmUnownedOpen, setConfirmUnownedOpen] = useState<boolean>(false);
@@ -180,6 +207,41 @@ export function MorphSimulatorPanel({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [customName, setCustomName] = useState<string>('');
   const [spawnNotice, setSpawnNotice] = useState<string | null>(null);
+  const [allowSynthesis, setAllowSynthesis] = useState<boolean>(false);
+  const [synthesisNotice, setSynthesisNotice] = useState<string | null>(null);
+
+  const installedPackIds = useMemo(
+    () => (isPackSandbox ? getInstalledModPacks().map((p) => p.packId) : []),
+    [isPackSandbox, focusPackId]
+  );
+
+  const effectiveModPackIds = useMemo(() => {
+    if (!isPackSandbox) return enabledModPacks;
+    if (includeUnowned) return installedPackIds;
+    return focusPackId ? [focusPackId] : [];
+  }, [isPackSandbox, enabledModPacks, includeUnowned, installedPackIds, focusPackId]);
+
+  const enabledModLoci = useMemo(
+    () => getEnabledModLoci(effectiveModPackIds),
+    [effectiveModPackIds]
+  );
+
+  const allInstalledModLociCount = useMemo(
+    () => (isPackSandbox ? getEnabledModLoci(installedPackIds).length : enabledModLoci.length),
+    [isPackSandbox, installedPackIds, enabledModLoci.length]
+  );
+
+  const focusPackLociCount = useMemo(
+    () => (focusPackId ? getEnabledModLoci([focusPackId]).length : 0),
+    [focusPackId]
+  );
+
+  const allowCoreSynthesisInScope = customEnabled && (!isPackSandbox || includeUnowned);
+  const enabledModRecipeCount = useMemo(
+    () => getEnabledModRecipes(effectiveModPackIds).length,
+    [effectiveModPackIds]
+  );
+  const hasAvailableSynthesis = allowCoreSynthesisInScope || enabledModRecipeCount > 0;
 
   // Skin Field Debugger state
   const [debugStage, setDebugStage] = useState<SkinDebugStage>('final');
@@ -215,9 +277,23 @@ export function MorphSimulatorPanel({
     return set;
   }, [snakes, enabledLoci]);
 
+  const ownedModLoci = useMemo(() => {
+    const set = new Set<string>();
+    for (const snake of snakes) {
+      for (const mod of enabledModLoci) {
+        if (countAlleles(snake.modAlleles?.[mod.fullId] ?? [0, 0]) > 0) {
+          set.add(mod.fullId);
+        }
+      }
+    }
+    return set;
+  }, [snakes, enabledModLoci]);
+
+  const activeCleanedModAlleles = useMemo(() => cleanModAlleles(modAlleles), [modAlleles]);
+
   const previewPhenotype = useMemo(
-    () => evaluatePhenotype(genotype, polygenicSeed),
-    [genotype, polygenicSeed]
+    () => evaluatePhenotype(genotype, polygenicSeed, activeCleanedModAlleles),
+    [genotype, polygenicSeed, activeCleanedModAlleles]
   );
 
   const baseSkinSpec = useMemo(
@@ -254,6 +330,7 @@ export function MorphSimulatorPanel({
       id: 'sim_preview',
       name: customName.trim() || previewPhenotype.morphName,
       genotype,
+      ...(activeCleanedModAlleles ? { modAlleles: activeCleanedModAlleles } : {}),
       polygenicSeed,
       phenotype: previewPhenotype,
       currentVigor: previewPhenotype.lineageVigor,
@@ -286,12 +363,53 @@ export function MorphSimulatorPanel({
     [genotype, enabledLoci]
   );
 
+  const activeModLoci = useMemo(
+    () =>
+      enabledModLoci
+        .filter((m) => countAlleles(modAlleles[m.fullId] ?? [0, 0]) > 0)
+        .map((m) => ({
+          fullId: m.fullId,
+          packName: m.packName,
+          spec: m.spec,
+          count: countAlleles(modAlleles[m.fullId] ?? [0, 0]),
+        })),
+    [modAlleles, enabledModLoci]
+  );
+
+  const visibleModLoci = useMemo(() => {
+    if (categoryFilter === 'real') return [];
+    const q = searchQuery.trim().toLowerCase();
+    return enabledModLoci.filter((m) => {
+      const active = countAlleles(modAlleles[m.fullId] ?? [0, 0]) > 0;
+      if (!isPackSandbox && !includeUnowned && !ownedModLoci.has(m.fullId) && !active) return false;
+      if (
+        (categoryFilter === 'dominant' ||
+          categoryFilter === 'codominant' ||
+          categoryFilter === 'recessive') &&
+        m.spec.mode !== categoryFilter
+      ) {
+        return false;
+      }
+      if (q) {
+        const hay =
+          `${m.spec.name} ${m.spec.superName ?? ''} ${m.spec.visualEffect} ${m.packName} ${m.spec.tags.join(' ')}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [isPackSandbox, includeUnowned, ownedModLoci, modAlleles, categoryFilter, searchQuery, enabledModLoci]);
+
   const visibleLoci = useMemo(() => {
+    if (categoryFilter === 'packs') return [];
     const q = searchQuery.trim().toLowerCase();
     return enabledLoci.filter((id) => {
       const def = LOCUS_DEFINITIONS[id];
       const active = countAlleles(genotype[id]) > 0;
-      if (!includeUnowned && !ownedLoci.has(id) && !active) return false;
+      if (isPackSandbox) {
+        if (!includeUnowned && !active) return false;
+      } else if (!includeUnowned && !ownedLoci.has(id) && !active) {
+        return false;
+      }
       if (categoryFilter === 'custom' && !def.isCustom) return false;
       if (categoryFilter === 'real' && def.isCustom) return false;
       if (
@@ -317,23 +435,79 @@ export function MorphSimulatorPanel({
     setCopiedJson(false);
   };
 
+  const applySelectionWithOptionalSynthesis = (
+    nextGenotype: Genotype,
+    nextModAlleles: ModAlleleMap,
+    forceRun = false
+  ) => {
+    if ((allowSynthesis || forceRun) && hasAvailableSynthesis) {
+      const res = applySimulatorSynthesis(nextGenotype, nextModAlleles, {
+        allowCoreSynthesis: allowCoreSynthesisInScope,
+        enabledModPacks: effectiveModPackIds,
+      });
+      setGenotype(res.genotype);
+      setModAlleles(res.modAlleles ?? {});
+      if (res.triggered) {
+        const label = res.triggered.isRecessiveHet
+          ? `Het ${res.triggered.resultName} (1×)`
+          : res.triggered.resultCount === 2
+            ? `${res.triggered.resultName} (2×)`
+            : res.triggered.resultName;
+        setSynthesisNotice(
+          `Synthesized ${label} from ${res.triggered.ingredientAName} + ${res.triggered.ingredientBName}`
+        );
+      } else {
+        setSynthesisNotice(null);
+      }
+      return;
+    }
+    setGenotype(nextGenotype);
+    setModAlleles(nextModAlleles);
+    setSynthesisNotice(null);
+  };
+
   const setLocusCount = (locusId: LocusId, count: 0 | 1 | 2) => {
     // Super Spider (2x) is homozygous lethal in real ball pythons and cannot be bred
     if (locusId === 'spider' && count === 2) return;
-    setGenotype((prev) => ({
-      ...prev,
+    const nextGenotype: Genotype = {
+      ...genotype,
       [locusId]: allelesForCount(count),
-    }));
+    };
+    applySelectionWithOptionalSynthesis(nextGenotype, modAlleles);
     clearFieldOverrides();
     setSpawnNotice(null);
   };
 
+  const setModLocusCount = (fullId: string, count: 0 | 1 | 2) => {
+    const nextMod: ModAlleleMap = { ...modAlleles };
+    if (count === 0) {
+      delete nextMod[fullId];
+    } else {
+      nextMod[fullId] = allelesForCount(count);
+    }
+    applySelectionWithOptionalSynthesis(genotype, nextMod);
+    clearFieldOverrides();
+    setSpawnNotice(null);
+  };
+
+  const handleToggleAllowSynthesis = () => {
+    const next = !allowSynthesis;
+    setAllowSynthesis(next);
+    if (next) {
+      applySelectionWithOptionalSynthesis(genotype, modAlleles, true);
+    } else {
+      setSynthesisNotice(null);
+    }
+  };
+
   const handleReset = () => {
     setGenotype(createWildTypeGenotype());
+    setModAlleles({});
     setCustomName('');
     clearFieldOverrides();
     setDebugStage('final');
     setSpawnNotice(null);
+    setSynthesisNotice(null);
   };
 
   const handleRerollSeed = () => {
@@ -357,12 +531,15 @@ export function MorphSimulatorPanel({
   };
 
   const handleDevAddToCollection = () => {
+    if (!onDebugAddSnake) return;
     const existingNames = new Set(snakes.map((s) => s.name));
     const spawned = createSimulatedSnake(
       genotype,
       polygenicSeed,
       existingNames,
-      customName.trim() || undefined
+      customName.trim() || undefined,
+      Math.random,
+      activeCleanedModAlleles
     );
     onDebugAddSnake(spawned);
     setSpawnNotice(`Added ${spawned.name} (${spawned.phenotype.morphName}) to Collection`);
@@ -477,15 +654,17 @@ export function MorphSimulatorPanel({
                 <span className="tabular-nums">Vigour {maxVigor}</span>
               </div>
             </div>
-            <span
-              className={`text-[10px] font-medium px-2 py-0.5 rounded shrink-0 ${
-                isAlreadyDiscovered
-                  ? 'bg-[#2C3F2F] text-[#CBEAD0] border border-[#65A37D]/35'
-                  : 'bg-[#3A2E1A] text-[#F1CD82] border border-[#D9A754]/40'
-              }`}
-            >
-              {isAlreadyDiscovered ? 'Discovered' : 'Undiscovered'}
-            </span>
+            {!isPackSandbox && (
+              <span
+                className={`text-[10px] font-medium px-2 py-0.5 rounded shrink-0 ${
+                  isAlreadyDiscovered
+                    ? 'bg-[#2C3F2F] text-[#CBEAD0] border border-[#65A37D]/35'
+                    : 'bg-[#3A2E1A] text-[#F1CD82] border border-[#D9A754]/40'
+                }`}
+              >
+                {isAlreadyDiscovered ? 'Discovered' : 'Undiscovered'}
+              </span>
+            )}
           </div>
 
           <div className="flex justify-center">
@@ -753,14 +932,31 @@ export function MorphSimulatorPanel({
           <div className="pt-2 border-t border-[#D8BC87]/15 space-y-1.5">
             <div className="text-[11px] font-semibold text-[#B3A490] flex items-center gap-1.5">
               <Sparkles className="w-3 h-3 text-[#D9A754]" aria-hidden="true" />
-              <span>Active Genes ({activeLoci.length})</span>
+              <span>Active Genes ({activeLoci.length + activeModLoci.length})</span>
             </div>
-            {activeLoci.length === 0 ? (
+            {activeLoci.length === 0 && activeModLoci.length === 0 ? (
               <p className="text-[11px] text-[#8F806E]">
                 Select genes on the right to simulate any combo.
               </p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
+                {activeModLoci.map(({ fullId, spec, count }) => (
+                  <button
+                    key={fullId}
+                    type="button"
+                    onClick={() => setModLocusCount(fullId, 0)}
+                    title={`Remove ${spec.name}`}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-[#1C2E30] hover:bg-[#243C3F] text-[#D8F6F2] border border-[#56B8B0]/45 cursor-pointer transition-colors"
+                  >
+                    <span>
+                      {spec.name}{' '}
+                      <span className="text-[#8CE6DA] font-mono-code text-[10px]">
+                        {formatActiveChipBadge(spec.mode, count)}
+                      </span>
+                    </span>
+                    <X className="w-3 h-3 text-[#9EE8DE]" aria-hidden="true" />
+                  </button>
+                ))}
                 {activeLoci.map(({ id, def, count }) => (
                   <button
                     key={id}
@@ -783,8 +979,8 @@ export function MorphSimulatorPanel({
           </div>
         </div>
 
-        {/* Developer Debug Spawner (disabled in production builds) */}
-        {DEV_TOOLS_ENABLED && (
+        {/* Developer Debug Spawner (disabled in production builds & standalone pack sandbox) */}
+        {DEV_TOOLS_ENABLED && !isPackSandbox && onDebugAddSnake && (
           <div className="rounded-xl bg-[#1E1924] border border-[#9B6EDB]/35 p-3.5 space-y-2">
             <div className="flex items-center justify-between gap-2">
               <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#D6B8FF]">
@@ -849,51 +1045,97 @@ export function MorphSimulatorPanel({
             </p>
           </div>
 
-          <label
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#27201A] border border-[#D8BC87]/25 cursor-pointer select-none"
-            data-testid="sim-toggle-unowned-label"
-          >
-            <input
-              type="checkbox"
-              data-testid="sim-toggle-unowned"
-              checked={includeUnowned}
-              onChange={(e) => {
-                if (e.target.checked) {
-                  setConfirmUnownedOpen(true);
-                } else {
-                  setIncludeUnowned(false);
-                }
-              }}
-              className="w-3.5 h-3.5 accent-[#D9A754] rounded cursor-pointer"
-            />
-            <span className="text-xs font-medium text-[#EFE5D6]">
-              Include unowned genes
-            </span>
-            <span className="font-mono-code text-[11px] text-[#A89A87]">
-              ({includeUnowned ? enabledLoci.length : ownedLoci.size}/{enabledLoci.length})
-            </span>
-          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            {hasAvailableSynthesis && (
+              <button
+                type="button"
+                data-testid="sim-allow-synthesis-btn"
+                aria-pressed={allowSynthesis}
+                onClick={handleToggleAllowSynthesis}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-medium cursor-pointer transition-colors ${
+                  allowSynthesis
+                    ? 'bg-[#362749] border-[#B68DF2]/70 text-[#F1E4FF] font-semibold'
+                    : 'bg-[#27201A] hover:bg-[#322920] border-[#D8BC87]/25 text-[#D8CAB6]'
+                }`}
+              >
+                <Sparkles
+                  className={`w-3.5 h-3.5 ${allowSynthesis ? 'text-[#E3C6FF]' : 'text-[#A89A87]'}`}
+                  aria-hidden="true"
+                />
+                <span>Allow synthesis</span>
+              </button>
+            )}
+            {onOpenModPacks && (
+              <button
+                type="button"
+                data-testid="sim-open-mod-packs-btn"
+                onClick={onOpenModPacks}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#1C2B2D] hover:bg-[#24383B] border border-[#56B8B0]/35 text-xs font-medium text-[#C5F2EC] cursor-pointer transition-colors"
+              >
+                <Package className="w-3.5 h-3.5 text-[#7AE0D4]" aria-hidden="true" />
+                <span>Gene Packs</span>
+              </button>
+            )}
+            <label
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#27201A] border border-[#D8BC87]/25 cursor-pointer select-none"
+              data-testid="sim-toggle-unowned-label"
+            >
+              <input
+                type="checkbox"
+                data-testid="sim-toggle-unowned"
+                checked={includeUnowned}
+                onChange={(e) => {
+                  if (isPackSandbox) {
+                    setIncludeUnowned(e.target.checked);
+                  } else if (e.target.checked) {
+                    setConfirmUnownedOpen(true);
+                  } else {
+                    setIncludeUnowned(false);
+                  }
+                }}
+                className="w-3.5 h-3.5 accent-[#D9A754] rounded cursor-pointer"
+              />
+              <span className="text-xs font-medium text-[#EFE5D6]">
+                {isPackSandbox ? 'Include all installed genes' : 'Include unowned genes'}
+              </span>
+              <span className="font-mono-code text-[11px] text-[#A89A87]">
+                {isPackSandbox
+                  ? `(${includeUnowned ? enabledLoci.length + allInstalledModLociCount : focusPackLociCount}/${enabledLoci.length + allInstalledModLociCount})`
+                  : `(${includeUnowned ? enabledLoci.length + enabledModLoci.length : ownedLoci.size + ownedModLoci.size}/${enabledLoci.length + enabledModLoci.length})`}
+              </span>
+            </label>
+          </div>
         </div>
+
+        {synthesisNotice && (
+          <div
+            role="status"
+            data-testid="sim-synthesis-notice"
+            className="rounded-xl bg-[#2A1F38] border border-[#B68DF2]/45 px-3 py-2 text-xs text-[#EAD8FF] flex items-center gap-2"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-[#DFBFFF] shrink-0" aria-hidden="true" />
+            <span>✦ {synthesisNotice}</span>
+          </div>
+        )}
 
         {/* Filter & Search Bar */}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1">
-            {(customEnabled
-              ? ([
-                  { id: 'all', label: 'All' },
-                  { id: 'real', label: 'Real-World' },
-                  { id: 'custom', label: 'Custom' },
-                  { id: 'dominant', label: 'Dominant' },
-                  { id: 'codominant', label: 'Codominant' },
-                  { id: 'recessive', label: 'Recessive' },
-                ] as const)
-              : ([
-                  { id: 'all', label: 'All' },
-                  { id: 'dominant', label: 'Dominant' },
-                  { id: 'codominant', label: 'Codominant' },
-                  { id: 'recessive', label: 'Recessive' },
-                ] as const)
-            ).map((tab) => (
+            {([
+              { id: 'all' as const, label: 'All' },
+              ...((!isPackSandbox || includeUnowned) && customEnabled
+                ? [
+                    { id: 'real' as const, label: 'Real-World' },
+                    { id: 'custom' as const, label: 'Custom' },
+                  ]
+                : []),
+              ...((!isPackSandbox || includeUnowned) && enabledModLoci.length > 0
+                ? [{ id: 'packs' as const, label: `Packs (${enabledModLoci.length})` }]
+                : []),
+              { id: 'dominant' as const, label: 'Dominant' },
+              { id: 'codominant' as const, label: 'Codominant' },
+              { id: 'recessive' as const, label: 'Recessive' },
+            ]).map((tab) => (
               <button
                 key={tab.id}
                 type="button"
@@ -902,7 +1144,9 @@ export function MorphSimulatorPanel({
                   categoryFilter === tab.id
                     ? tab.id === 'custom'
                       ? 'bg-[#9B6EDB] text-white'
-                      : 'bg-[#D9A754] text-[#1C1610]'
+                      : tab.id === 'packs'
+                        ? 'bg-[#56B8B0] text-[#102022]'
+                        : 'bg-[#D9A754] text-[#1C1610]'
                     : 'bg-[#27201A] text-[#C2B4A1] hover:text-[#F5EFE4]'
                 }`}
               >
@@ -928,21 +1172,91 @@ export function MorphSimulatorPanel({
         </div>
 
         {/* Gene Picker Grid */}
-        {visibleLoci.length === 0 ? (
+        {visibleLoci.length === 0 && visibleModLoci.length === 0 ? (
           <div className="rounded-xl bg-[#251F19] border border-[#D8BC87]/20 p-6 text-center space-y-2">
             <p className="text-sm text-[#DFD3C2]">No genes match the current filter.</p>
             {!includeUnowned && (
               <button
                 type="button"
-                onClick={() => setConfirmUnownedOpen(true)}
+                onClick={() =>
+                  isPackSandbox ? setIncludeUnowned(true) : setConfirmUnownedOpen(true)
+                }
                 className="px-3 py-1.5 rounded-lg bg-[#D9A754] hover:bg-[#E7B96A] text-xs font-semibold text-[#1C1610] cursor-pointer"
               >
-                Include unowned genes ({enabledLoci.length} total)
+                {isPackSandbox
+                  ? `Include all installed genes (${enabledLoci.length + allInstalledModLociCount} total)`
+                  : `Include unowned genes (${enabledLoci.length + enabledModLoci.length} total)`}
               </button>
             )}
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {visibleModLoci.map((mod) => {
+              const count = countAlleles(modAlleles[mod.fullId] ?? [0, 0]);
+              const isOwned = ownedModLoci.has(mod.fullId);
+              const [lbl0, lbl1, lbl2] = getAlleleButtonLabels(mod.spec.mode);
+              return (
+                <div
+                  key={mod.fullId}
+                  data-testid={`sim-mod-locus-card-${mod.spec.id}`}
+                  className={`rounded-xl p-3 border transition-colors flex flex-col justify-between gap-2 ${
+                    count > 0
+                      ? 'bg-[#19282A] border-[#56B8B0]/65'
+                      : 'bg-[#1E2424] border-[#56B8B0]/25'
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-display text-sm font-semibold text-[#F7F1E5]">
+                          {mod.spec.name}
+                        </span>
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#1E363A] text-[#9EE8DE] border border-[#56B8B0]/40">
+                          {mod.packName}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-[10px] capitalize text-[#A8BDBC]">
+                          {mod.spec.mode}
+                        </span>
+                        {!isPackSandbox && isOwned && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#2A3D2C] text-[#BCE6C3] border border-[#5F9A6E]/35">
+                            Owned
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-[#B6C7C6] mt-0.5 leading-snug">
+                      {mod.spec.visualEffect}
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-1">
+                    {([0, 1, 2] as const).map((level) => {
+                      const label = level === 0 ? lbl0 : level === 1 ? lbl1 : lbl2;
+                      const selected = count === level;
+                      return (
+                        <button
+                          key={level}
+                          type="button"
+                          data-testid={`sim-mod-locus-${mod.spec.id}-${level}`}
+                          onClick={() => setModLocusCount(mod.fullId, level)}
+                          className={`py-1 px-1 rounded-md text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                            selected
+                              ? level === 0
+                                ? 'bg-[#324041] text-[#F5EFE4] border border-[#56B8B0]/40'
+                                : 'bg-[#56B8B0] text-[#102022] font-semibold'
+                              : 'bg-[#141A1B] text-[#9EB2B1] hover:text-[#EFE5D6] hover:bg-[#222D2E]'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
             {visibleLoci.map((id) => {
               const def = LOCUS_DEFINITIONS[id];
               const count = countAlleles(genotype[id]);
@@ -975,7 +1289,7 @@ export function MorphSimulatorPanel({
                         <span className="text-[10px] capitalize text-[#A89A87]">
                           {def.mode}
                         </span>
-                        {isOwned && (
+                        {!isPackSandbox && isOwned && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#2A3D2C] text-[#BCE6C3] border border-[#5F9A6E]/35">
                             Owned
                           </span>

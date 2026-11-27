@@ -127,6 +127,13 @@ export type AllelePair = [0 | 1, 0 | 1];
 
 export type Genotype = Record<LocusId, AllelePair>;
 
+/**
+ * Sparse map of Workshop / local Gene Pack alleles keyed by namespaced locus ID
+ * (e.g. `mod:local_celestial:starlight`). Kept separate from indexed core `Genotype`
+ * so subscribing/unsubscribing packs never corrupts existing save indices.
+ */
+export type ModAlleleMap = Record<string, AllelePair>;
+
 export type MorphRarity = 'common' | 'uncommon' | 'rare' | 'legendary';
 
 export type PatternMotif =
@@ -340,6 +347,8 @@ export interface SnakeEntity {
   id: string;
   name: string;
   genotype: Genotype;
+  /** Optional sparse alleles for installed Workshop / local Gene Packs */
+  modAlleles?: ModAlleleMap;
   polygenicSeed: number;
   phenotype: SnakePhenotype;
   /** Current breeding vigour in [0, phenotype.lineageVigor] */
@@ -397,7 +406,7 @@ export interface BreedingOddsEntry {
   includesUpsideDown: boolean;
   outcomeKind?: BreedingOutcomeKind;
   synthesisTier?: number;
-  synthesisResultLocus?: LocusId;
+  synthesisResultLocus?: LocusId | string;
 }
 
 export interface SpinePoint {
