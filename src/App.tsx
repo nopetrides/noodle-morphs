@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DevGeneEditorModal } from './components/DevGeneEditorModal';
 import { GalleryDrawer } from './components/GalleryDrawer';
 import { HatchRevealModal } from './components/HatchRevealModal';
 import { HissDepotIntroModal } from './components/HissDepotIntroModal';
@@ -50,7 +51,7 @@ import {
   safeAddCurrency,
   safeSpendCurrency,
 } from './game/economy';
-import { DEV_TOOLS_ENABLED } from './game/env';
+import { DEV_GENE_EDITOR_ENABLED, DEV_TOOLS_ENABLED } from './game/env';
 import {
   breedClutch,
   buildInitialDiscoveries,
@@ -173,6 +174,9 @@ export default function App() {
     () => getInstalledModPacks().length
   );
   const [modPacksModalOpen, setModPacksModalOpen] = useState<boolean>(false);
+  const [devGeneEditorOpen, setDevGeneEditorOpen] = useState<boolean>(
+    () => DEV_GENE_EDITOR_ENABLED
+  );
   const [missingModPacks, setMissingModPacks] = useState<string[]>(() => {
     const candidate = autostartBoot?.state as { missingModPacks?: string[] } | undefined;
     return candidate?.missingModPacks ?? [];
@@ -1476,6 +1480,22 @@ export default function App() {
     };
   }, [pendingSale, soldMorphKeysSet, snakes, activeClutch, sire, dam]);
 
+  const handleBuiltinGenesSaved = useCallback(() => {
+    globalSkinCache.clear();
+    setSnakes((prev) =>
+      prev.map((s) => ({
+        ...s,
+        phenotype: evaluatePhenotype(s.genotype, s.polygenicSeed, s.modAlleles),
+      }))
+    );
+    setTitleSnakes((prev) =>
+      prev.map((s) => ({
+        ...s,
+        phenotype: evaluatePhenotype(s.genotype, s.polygenicSeed, s.modAlleles),
+      }))
+    );
+  }, []);
+
   const canvasSnakes = phase === 'title' ? titleSnakes : snakes;
 
   return (
@@ -1492,7 +1512,8 @@ export default function App() {
             needsStarterConfirm ||
             pendingSale ||
             slotModalMode ||
-            modPacksModalOpen
+            modPacksModalOpen ||
+            devGeneEditorOpen
         )}
         mistTriggerCount={mistTriggerCount}
         renderSettings={renderSettings}
@@ -1521,6 +1542,14 @@ export default function App() {
             audioEngine.playSoftClick();
             setModPacksModalOpen(true);
           }}
+          onOpenDevGeneEditor={
+            DEV_GENE_EDITOR_ENABLED
+              ? () => {
+                  audioEngine.playSoftClick();
+                  setDevGeneEditorOpen(true);
+                }
+              : undefined
+          }
         />
       )}
 
@@ -1744,6 +1773,14 @@ export default function App() {
             refreshSaveSlots();
             setSlotModalMode('load');
           }}
+          onOpenDevGeneEditor={
+            DEV_GENE_EDITOR_ENABLED
+              ? () => {
+                  audioEngine.playSoftClick();
+                  setDevGeneEditorOpen(true);
+                }
+              : undefined
+          }
           onReturnTitle={handleReturnToTitle}
           onResetTerrarium={handleResetTerrarium}
         />
@@ -1771,6 +1808,14 @@ export default function App() {
             setInstalledPackCount(getInstalledModPacks().length);
             refreshSaveSlots();
           }}
+        />
+      )}
+
+      {/* Dev-Only Core & Fun Built-in Gene Editor (active only in `vite --mode gene-editor`) */}
+      {DEV_GENE_EDITOR_ENABLED && devGeneEditorOpen && (
+        <DevGeneEditorModal
+          onClose={() => setDevGeneEditorOpen(false)}
+          onGenesSaved={handleBuiltinGenesSaved}
         />
       )}
     </main>

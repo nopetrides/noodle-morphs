@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:gene-editor": "vite --mode gene-editor",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
