@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { subscribeFrameTick } from '../game/frameClock';
 import { resolveSkinSpecForPhenotype } from '../game/genetics';
 import {
   createSeededPreviewSpine,
@@ -335,61 +336,21 @@ export function MiniSnakeCanvas({
       };
     }
 
-    let timerId = 0;
-    let rafId = 0;
-    let disposed = false;
-    let lastTime = performance.now();
+    let accumMs = 0;
 
-    const clearScheduled = () => {
-      if (timerId) {
-        window.clearTimeout(timerId);
-        timerId = 0;
-      }
-      if (rafId) {
-        window.cancelAnimationFrame(rafId);
-        rafId = 0;
-      }
-    };
-
-    const scheduleTick = () => {
-      if (disposed || document.hidden) return;
-      clearScheduled();
-      timerId = window.setTimeout(() => {
-        timerId = 0;
-        if (!disposed && !document.hidden) {
-          rafId = window.requestAnimationFrame(tick);
-        }
-      }, 60);
-    };
-
-    const tick = () => {
-      rafId = 0;
-      if (disposed || document.hidden) return;
-      const now = performance.now();
-      const dt = Math.min((now - lastTime) / 1000, 0.05);
-      lastTime = now;
+    // Route animated preview through the single master rAF tick (capped at 20 FPS, synced to frameClock)
+    const unsubscribeTick = subscribeFrameTick((_now, dtMs) => {
+      accumMs += dtMs;
+      if (accumMs < 48) return;
+      const dt = Math.min(accumMs / 1000, 0.05);
+      accumMs = 0;
       stepPreview!(dt);
       draw();
-      scheduleTick();
-    };
-
-    const handleVisibility = () => {
-      if (document.hidden) {
-        clearScheduled();
-      } else {
-        lastTime = performance.now();
-        scheduleTick();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibility);
-    scheduleTick();
+    });
 
     return () => {
-      disposed = true;
       drawRef.current = null;
-      document.removeEventListener('visibilitychange', handleVisibility);
-      clearScheduled();
+      unsubscribeTick();
       canvas.width = 0;
       canvas.height = 0;
     };

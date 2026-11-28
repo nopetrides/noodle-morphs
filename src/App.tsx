@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DesktopSmokeHud } from './components/DesktopSmokeHud';
 import { DevGeneEditorModal } from './components/DevGeneEditorModal';
 import { GalleryDrawer } from './components/GalleryDrawer';
 import { HatchRevealModal } from './components/HatchRevealModal';
@@ -68,11 +69,18 @@ import {
   onModPacksChanged,
 } from './game/modPacks';
 import {
+  getFrameRateSnapshot,
+  setFrameClockSettings,
+  subscribeFrameRate,
+  subscribeFrameTick,
+} from './game/frameClock';
+import {
   getRenderQualityProfile,
   loadRenderSettings,
   saveRenderSettings,
   type RenderSettings,
 } from './game/renderSettings';
+import { getDesktopBridge } from './platform/desktopBridge';
 import { globalSkinCache } from './game/skinCache';
 import {
   deleteSaveSlot,
@@ -274,6 +282,55 @@ export default function App() {
       );
     }
   }, [phase, titleShowcaseSig, titleShowcaseFlags, titleShowcaseModPacks]);
+
+  // Sync RenderSettings into the single unified frameClock authority
+  useEffect(() => {
+    setFrameClockSettings(renderSettings);
+  }, [renderSettings]);
+
+  const phaseRef = useRef<GamePhase>(phase);
+  phaseRef.current = phase;
+
+  // Unified UI animation clock: steps all CSS @keyframes animations (Hatch Clutch, eggs, pointers)
+  // inside the EXACT SAME master rAF tick as TerrariumCanvas so Canvas + UI composite into 1 single GPU frame!
+  useEffect(() => {
+    const root = document.documentElement;
+    const supportsWebAnimations = typeof document.getAnimations === 'function';
+    if (supportsWebAnimations) {
+      root.classList.add('ui-fps-managed');
+    }
+
+    const syncFromSnapshot = (snap: ReturnType<typeof getFrameRateSnapshot>) => {
+      root.classList.toggle('ui-transitions-off', snap.disableTransitions);
+      getDesktopBridge()?.setTargetFps(snap.targetFps);
+    };
+
+    syncFromSnapshot(getFrameRateSnapshot());
+    const unsubscribeRate = subscribeFrameRate(syncFromSnapshot);
+    const unsubscribeTick = supportsWebAnimations
+      ? subscribeFrameTick((_now, dtMs) => {
+          if (phaseRef.current === 'paused') return;
+          const animations = document.getAnimations();
+          for (let i = 0; i < animations.length; i++) {
+            const anim = animations[i];
+            if (typeof CSSAnimation !== 'undefined' && !(anim instanceof CSSAnimation)) continue;
+            const timing = anim.effect?.getComputedTiming();
+            const cur = typeof anim.currentTime === 'number' ? anim.currentTime : 0;
+            const endTime = typeof timing?.endTime === 'number' ? timing.endTime : Infinity;
+            if (cur < endTime) {
+              anim.currentTime = Math.min(endTime, cur + dtMs);
+            }
+          }
+        })
+      : () => {};
+
+    return () => {
+      unsubscribeTick();
+      unsubscribeRate();
+      root.classList.remove('ui-fps-managed');
+      root.classList.remove('ui-transitions-off');
+    };
+  }, []);
 
   // Keep installed pack count and active snake phenotypes in sync when packs are installed/removed
   useEffect(() => {
@@ -1496,6 +1553,22 @@ export default function App() {
     );
   }, []);
 
+  const isTerrariumOccluded = Boolean(
+    activeClutch ||
+      activeDrawer ||
+      needsStarterConfirm ||
+      pendingSale ||
+      slotModalMode ||
+      modPacksModalOpen ||
+      devGeneEditorOpen
+  );
+
+  // Only enable Electron's gentle 20Hz Steam Overlay keep-alive when the terrarium canvas is paused/occluded
+  // (during active play, our single master rAF tick already drives Chromium frames cleanly at 1x targetFps!)
+  useEffect(() => {
+    getDesktopBridge()?.setOverlayKeepAlive(phase === 'paused' || isTerrariumOccluded);
+  }, [phase, isTerrariumOccluded]);
+
   const canvasSnakes = phase === 'title' ? titleSnakes : snakes;
 
   return (
@@ -1506,15 +1579,7 @@ export default function App() {
         selectedSnakeId={phase === 'title' ? null : selectedSnakeId}
         phase={phase}
         heatLampOn={phase === 'title' ? true : settings.heatLampOn}
-        isOccluded={Boolean(
-          activeClutch ||
-            activeDrawer ||
-            needsStarterConfirm ||
-            pendingSale ||
-            slotModalMode ||
-            modPacksModalOpen ||
-            devGeneEditorOpen
-        )}
+        isOccluded={isTerrariumOccluded}
         mistTriggerCount={mistTriggerCount}
         renderSettings={renderSettings}
         onSelectSnake={handleSelectSnake}
@@ -1818,6 +1883,9 @@ export default function App() {
           onGenesSaved={handleBuiltinGenesSaved}
         />
       )}
+
+      {/* Phase 1.5 Desktop Smoke-Test Diagnostics Pill (renders only in Electron) */}
+      <DesktopSmokeHud />
     </main>
   );
 }

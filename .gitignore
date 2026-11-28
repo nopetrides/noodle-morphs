@@ -6,3 +6,4 @@ coverage/
 *.log
 .env*
 pattern-ref.md
+steam_appid.txt

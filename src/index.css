@@ -203,3 +203,17 @@
   scrollbar-width: thin;
   scrollbar-color: rgba(217, 167, 84, 0.52) rgba(27, 23, 19, 0.55);
 }
+
+/* Unified FPS-clock control: pause Chromium's native 144Hz keyframe ticker so App.tsx steps animations at targetFps */
+html.ui-fps-managed *,
+html.ui-fps-managed *::before,
+html.ui-fps-managed *::after {
+  animation-play-state: paused !important;
+}
+
+/* Disable 144Hz CSS transitions when unfocused in Pause/Eco mode or hidden */
+html.ui-transitions-off *,
+html.ui-transitions-off *::before,
+html.ui-transitions-off *::after {
+  transition-duration: 0s !important;
+}

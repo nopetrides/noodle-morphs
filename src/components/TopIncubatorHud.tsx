@@ -204,7 +204,7 @@ export function TopIncubatorHud({
                     </div>
                     <div className="h-1.5 w-full rounded-full bg-[#362E26] overflow-hidden">
                       <div
-                        className="h-full bg-[#D9A754] transition-transform duration-300 origin-left"
+                        className="h-full bg-[#D9A754] origin-left"
                         style={{ transform: `scaleX(${progress})` }}
                       />
                     </div>

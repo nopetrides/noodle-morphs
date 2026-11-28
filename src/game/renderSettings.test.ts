@@ -11,6 +11,13 @@ import {
 } from './renderSettings';
 import { createWildTypeGenotype, evaluatePhenotype, resolveSkinSpecForPhenotype } from './genetics';
 import { BoundedSkinCache } from './skinCache';
+import {
+  __setFrameClockEnvironmentForTest,
+  getCurrentTargetFps,
+  getFrameRateSnapshot,
+  setFrameClockSettings,
+  subscribeFrameRate,
+} from './frameClock';
 import { terminateIdleSkinWorkers } from './renderScheduler';
 
 test('normalizeRenderSettings falls back to safe defaults for missing or invalid inputs', () => {
@@ -140,4 +147,44 @@ test('terminateIdleSkinWorkers is safe to call repeatedly when no workers are ru
     terminateIdleSkinWorkers();
     terminateIdleSkinWorkers();
   });
+});
+
+test('frameClock provides a single unified targetFps authority across quality, focus, and visibility transitions', () => {
+  const observed: number[] = [];
+  const unsubscribe = subscribeFrameRate((snap) => observed.push(snap.targetFps));
+
+  try {
+    __setFrameClockEnvironmentForTest(true, false);
+    setFrameClockSettings({ quality: 'low', backgroundMode: 'eco' });
+    assert.equal(getCurrentTargetFps(), 20);
+    assert.equal(getFrameRateSnapshot().disableTransitions, false);
+
+    // Unfocused under Eco -> unified 5 FPS for canvas, animated mini-canvases, and UI animations
+    __setFrameClockEnvironmentForTest(false, false);
+    assert.equal(getCurrentTargetFps(), 5);
+    assert.equal(getFrameRateSnapshot().disableTransitions, true);
+
+    // Switch backgroundMode to Pause while unfocused -> unified 0 FPS
+    setFrameClockSettings({ quality: 'low', backgroundMode: 'pause' });
+    assert.equal(getCurrentTargetFps(), 0);
+    assert.equal(getFrameRateSnapshot().frameIntervalMs, Infinity);
+
+    // Focus restored on Ultra -> 60 FPS
+    setFrameClockSettings({ quality: 'ultra', backgroundMode: 'pause' });
+    __setFrameClockEnvironmentForTest(true, false);
+    assert.equal(getCurrentTargetFps(), 60);
+
+    // Hidden tab -> always 0 FPS
+    __setFrameClockEnvironmentForTest(true, true);
+    assert.equal(getCurrentTargetFps(), 0);
+
+    assert.ok(observed.includes(20));
+    assert.ok(observed.includes(5));
+    assert.ok(observed.includes(0));
+    assert.ok(observed.includes(60));
+  } finally {
+    unsubscribe();
+    __setFrameClockEnvironmentForTest(true, false);
+    setFrameClockSettings(DEFAULT_RENDER_SETTINGS);
+  }
 });
