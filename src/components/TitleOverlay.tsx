@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { FolderOpen, LogOut, Package, Play, PlusCircle, Wrench } from 'lucide-react';
 import { getGameModeLabel } from '../game/contentFlags';
 import type { SaveSlotSummary } from '../game/storage';
+import { getDesktopBridge } from '../platform/desktopBridge';
 
 interface TitleOverlayProps {
   hasSaves: boolean;
@@ -27,6 +28,11 @@ export function TitleOverlay({
   const [exitNotice, setExitNotice] = useState(false);
 
   const handleExit = () => {
+    const desktop = getDesktopBridge();
+    if (desktop) {
+      void desktop.quitApp();
+      return;
+    }
     window.close();
     // Browsers restrict window.close() on user-opened tabs; show a gentle fallback note if still open
     window.setTimeout(() => {

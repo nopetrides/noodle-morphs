@@ -9,6 +9,8 @@
     "dev": "vite",
     "dev:gene-editor": "vite --mode gene-editor",
     "build": "vite build",
+    "build:desktop": "vite build --mode desktop",
+    "desktop:smoke": "npm run build:desktop && node electron/launch.cjs",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
     "test": "tsx --test src/game/*.test.ts"
@@ -27,6 +29,8 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
+    "electron": "^35.7.5",
+    "steamworks.js": "^0.4.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2"

@@ -20,6 +20,12 @@
       "command": "npm run dev:gene-editor"
     },
     {
+      "name": "Desktop Preview (Electron)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run desktop:smoke"
+    },
+    {
       "name": "Build & Preview",
       "type": "node-terminal",
       "request": "launch",

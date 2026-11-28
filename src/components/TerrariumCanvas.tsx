@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react';
+import { getFrameRateSnapshot, subscribeFrameRate, subscribeFrameTick } from '../game/frameClock';
 import { terminateIdleSkinWorkers } from '../game/renderScheduler';
 import {
   DEFAULT_RENDER_SETTINGS,
-  getEffectiveTargetFps,
   getRenderQualityProfile,
   type RenderSettings,
 } from '../game/renderSettings';
@@ -10,6 +10,7 @@ import { globalSkinCache } from '../game/skinCache';
 import { renderProceduralSnake } from '../game/snakeRenderer';
 import { createSpine, hitTestSpine, stepSpine } from '../game/spine';
 import type { GamePhase, SnakeEntity, SnakeSpine } from '../game/types';
+import { recordTerrariumFrame } from '../platform/desktopBridge';
 
 import BACKDROP_SRC from '../assets/images/terrarium_floor_backdrop_1795521551353.jpg';
 
@@ -678,53 +679,33 @@ export function TerrariumCanvas({
       }
     };
 
-    let timerId = 0;
-    let rafId = 0;
     let disposed = false;
     let isContextLost = false;
-    let isTabHidden = typeof document !== 'undefined' ? document.hidden : false;
-    let isWindowFocused = typeof document !== 'undefined' ? document.hasFocus() : true;
-    let lastTime = performance.now();
     let elapsedTotal = 0;
     let waterRippleCooldown = 0;
-
-    const clearScheduledFrame = () => {
-      if (timerId) {
-        window.clearTimeout(timerId);
-        timerId = 0;
-      }
-      if (rafId) {
-        window.cancelAnimationFrame(rafId);
-        rafId = 0;
-      }
-    };
 
     const recoverGpuSurfaces = () => {
       isContextLost = false;
       globalSkinCache.rehydrateAllCanvases();
       staticDirty = true;
-      wakeLoop();
     };
 
     const handleContextLost = (e: Event) => {
       e.preventDefault();
       isContextLost = true;
-      clearScheduledFrame();
     };
 
     const handleContextRestored = () => {
       recoverGpuSurfaces();
     };
 
-    const handleVisibilityChange = () => {
-      isTabHidden = document.hidden;
-      if (isTabHidden) {
-        clearScheduledFrame();
+    let prevTabHidden = getFrameRateSnapshot().isTabHidden;
+    const unsubscribeFrameRate = subscribeFrameRate((snap) => {
+      if (snap.isTabHidden && !prevTabHidden) {
         // Shed idle Web Worker memory while user is in another tab
         terminateIdleSkinWorkers();
-      } else {
+      } else if (!snap.isTabHidden && prevTabHidden) {
         // Proactively verify GPU surfaces & rehydrate skins after returning from a background tab
-        lastTime = performance.now();
         const sLost =
           typeof (sctx as CanvasRenderingContext2D & { isContextLost?: () => boolean }).isContextLost === 'function' &&
           (sctx as CanvasRenderingContext2D & { isContextLost: () => boolean }).isContextLost();
@@ -736,69 +717,24 @@ export function TerrariumCanvas({
         }
         globalSkinCache.rehydrateAllCanvases();
         staticDirty = true;
-        wakeLoop();
       }
-    };
-
-    const handleWindowFocus = () => {
-      isWindowFocused = true;
-      lastTime = performance.now();
-      wakeLoop();
-    };
-
-    const handleWindowBlur = () => {
-      isWindowFocused = false;
-      const fps = getEffectiveTargetFps(renderSettingsRef.current, false, isTabHidden);
-      if (fps === 0) {
-        clearScheduledFrame();
-      }
-    };
+      prevTabHidden = snap.isTabHidden;
+    });
 
     staticCanvas.addEventListener('contextlost', handleContextLost);
     staticCanvas.addEventListener('contextrestored', handleContextRestored);
     liveCanvas.addEventListener('contextlost', handleContextLost);
     liveCanvas.addEventListener('contextrestored', handleContextRestored);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('focus', handleWindowFocus);
-    window.addEventListener('blur', handleWindowBlur);
-
-    const scheduleNextFrame = (targetFps: number) => {
-      if (disposed || isContextLost || targetFps <= 0) return;
-      clearScheduledFrame();
-      if (targetFps >= 58) {
-        rafId = window.requestAnimationFrame(renderFrame);
-        return;
-      }
-      const delayMs = Math.max(8, Math.floor(1000 / targetFps) - 4);
-      timerId = window.setTimeout(() => {
-        timerId = 0;
-        if (!disposed) {
-          rafId = window.requestAnimationFrame(renderFrame);
-        }
-      }, delayMs);
-    };
 
     function wakeLoop() {
-      if (disposed || isContextLost) return;
-      const isPausedOrHidden = phaseRef.current === 'paused' || isOccludedRef.current;
-      const targetFps = getEffectiveTargetFps(
-        renderSettingsRef.current,
-        isWindowFocused,
-        isTabHidden
-      );
-      if (isPausedOrHidden || targetFps <= 0) {
-        clearScheduledFrame();
-        return;
-      }
-      if (!timerId && !rafId) {
-        lastTime = performance.now();
-        rafId = window.requestAnimationFrame(renderFrame);
+      // Master frameClock drives ticks automatically; rebuild static layer immediately if dirty
+      if (!disposed && !isContextLost && (staticDirty || lastStaticLamp !== heatLampRef.current)) {
+        rebuildStaticLayer();
       }
     }
     wakeLoopRef.current = wakeLoop;
 
-    const renderFrame = () => {
-      rafId = 0;
+    const renderFrame = (_now: number, dtMs: number) => {
       if (disposed || isContextLost) return;
 
       const sLost =
@@ -813,26 +749,17 @@ export function TerrariumCanvas({
       }
 
       const isPausedOrHidden = phaseRef.current === 'paused' || isOccludedRef.current;
-      const targetFps = getEffectiveTargetFps(
-        renderSettingsRef.current,
-        isWindowFocused,
-        isTabHidden
-      );
 
       if (staticDirty || lastStaticLamp !== heatLampRef.current) {
         rebuildStaticLayer();
       }
 
-      if (isPausedOrHidden || targetFps <= 0) {
-        // Truly idle: stop scheduling RAF/timers until wakeLoop() fires on resume/focus/visible
-        clearScheduledFrame();
+      if (isPausedOrHidden) {
         return;
       }
 
-      const now = performance.now();
-      const rawDt = (now - lastTime) / 1000;
-      lastTime = now;
-      const dt = Math.min(rawDt, 0.08);
+      recordTerrariumFrame();
+      const dt = Math.min(dtMs / 1000, 0.08);
       const profile = getRenderQualityProfile(renderSettingsRef.current.quality);
 
       syncSimSnakes();
@@ -934,27 +861,25 @@ export function TerrariumCanvas({
       drawParticles();
       drawDynamicPropsAndFraming(elapsedTotal);
       ctx.restore();
-
-      scheduleNextFrame(targetFps);
     };
 
-    renderFrame();
+    // Draw initial frame immediately and subscribe to the single unified master rAF tick
+    renderFrame(performance.now(), 16.67);
+    const unsubscribeFrameTick = subscribeFrameTick(renderFrame);
 
     return () => {
       disposed = true;
       wakeLoopRef.current = null;
       applyQualityRef.current = null;
       mistBurstFnRef.current = null;
-      clearScheduledFrame();
+      unsubscribeFrameTick();
       backdropImg.onload = null;
       resizeObserver.disconnect();
+      unsubscribeFrameRate();
       staticCanvas.removeEventListener('contextlost', handleContextLost);
       staticCanvas.removeEventListener('contextrestored', handleContextRestored);
       liveCanvas.removeEventListener('contextlost', handleContextLost);
       liveCanvas.removeEventListener('contextrestored', handleContextRestored);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', handleWindowFocus);
-      window.removeEventListener('blur', handleWindowBlur);
       liveCanvas.removeEventListener('pointermove', handlePointerMove);
       liveCanvas.removeEventListener('pointerdown', handlePointerDown);
       // Release full-viewport GPU backing stores cleanly on unmount

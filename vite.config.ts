@@ -127,12 +127,40 @@ function devGeneEditorPlugin(): Plugin {
 
 export default defineConfig(({ command, mode }) => {
   const isGeneEditorServe = command === 'serve' && mode === 'gene-editor';
+  const isDesktopBuild = mode === 'desktop';
   return {
-    base: '/noodle-morphs/',
+    base: isDesktopBuild ? './' : '/noodle-morphs/',
     plugins: [react(), tailwindcss(), ...(isGeneEditorServe ? [devGeneEditorPlugin()] : [])],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
+      },
+    },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('lucide-react') || id.includes('motion') || id.includes('framer-motion')) {
+                return 'vendor-ui';
+              }
+              if (id.includes('react') || id.includes('scheduler')) {
+                return 'vendor-react';
+              }
+              return 'vendor';
+            }
+            if (
+              id.includes('/src/game/genetics.ts') ||
+              id.includes('/src/game/elementalSynthesis.ts') ||
+              id.includes('/src/game/skinField.ts') ||
+              id.includes('/src/game/modPacks.ts') ||
+              id.includes('/src/game/builtinGeneOverrides')
+            ) {
+              return 'game-genetics';
+            }
+            return undefined;
+          },
+        },
       },
     },
   };
